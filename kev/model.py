@@ -127,15 +127,17 @@ def encode(tok, rec, max_state=MAX_STATE, max_branch=MAX_BRANCH, strict=False, o
             "labels": [q["label"] for q in rec["questions"]], "state_tokens": len(state_tokens) + 1, "state_truncated": len(state_tokens) + 1 > max_state}
 
 
-def admit(model, tok, rec, truncate=False):
+def admit(model, tok, rec, truncate=False, *, max_state=None, max_branch=None):
     """The serving admission check (kev.serve and the Space; the torch and MLX models both encode through encode above):
     -> rec encoded within the serving context. A state over SERVE_MAX_STATE tokens (the <state> token included) raises
     ContextOverflow saying how long it is and how to fix it, unless truncate=True: then its first SERVE_MAX_STATE tokens
     are read and the encoding says so (state_truncated, state_tokens). A question whose row (state + its branch) is over
     SERVE_MAX_BRANCH raises ContextOverflow either way. Benchmarks do not truncate either: kev.predictors.LocalPredictor
     encodes strictly within its suite's context."""
+    max_state = SERVE_MAX_STATE if max_state is None else max_state
+    max_branch = SERVE_MAX_BRANCH if max_branch is None else max_branch
     try:
-        return model.encode(tok, rec, max_state=SERVE_MAX_STATE, max_branch=SERVE_MAX_BRANCH, strict=not truncate)
+        return model.encode(tok, rec, max_state=max_state, max_branch=max_branch, strict=not truncate)
     except ContextOverflow as e:
         if e.max_state is None: raise
         raise ContextOverflow(f"state is {e.state_tokens:,} tokens, over the {e.max_state:,}-token limit (the <state> token included): "

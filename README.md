@@ -80,6 +80,24 @@ uv sync --extra serve
 uv run --extra serve python -m kev.serve --run jaredpalmer/kev-4b --port 8009
 ```
 
+For a 64-layer Kev-27B checkpoint on four CUDA GPUs, run the bounded BF16 pipeline:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 KEV_API_KEY=<key> uv run --extra serve python -m kev.serve \
+  --run /path/to/verified/kev-27b --tokenizer-path /path/to/verified/kev-27b \
+  --pipeline-parallel 4 --host 0.0.0.0 --port 18794
+```
+
+PP4 requires `flash-linear-attention==0.5.2`, `fla-core==0.5.2` and `triton==3.7.1`.
+It admits at most 8,192 state tokens and 8,192 tokens in a state plus one question.
+Its microbatches have 16,384 padded tokens each for states, question outputs, and row workspaces.
+Split questions across requests if one request exceeds a padded budget; inputs are never truncated.
+The server accepts at most 256 requests including active work (503 when full), with a 120-second
+request timeout (504). `/readyz` is ready after the finite CUDA graph warm-up; `/healthz`
+reports worker health. Both are unauthenticated health checks. `/v1/*` uses the bearer key.
+`/v1/models` reports the pipeline's revision, temperature and limits. Other input shapes run eager
+with bounded scratch buffers. The default `--pipeline-parallel 1` retains the regular serving path.
+
 This starts Kev-4B on your machine: CUDA or ROCm if you have a GPU, MLX on Apple Silicon. The first run downloads the adapter and the base model. `--run` also accepts a local checkpoint directory or a Hub revision like `jaredpalmer/kev-4b@qwen3`.
 
 In another terminal, send it a ticket:

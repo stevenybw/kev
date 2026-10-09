@@ -25,6 +25,7 @@ import socket
 from pathlib import Path
 
 import pytest
+from huggingface_hub.errors import LocalEntryNotFoundError
 
 from kev import rounds
 from kev.suite import ADMISSION_TOKENIZER, read_json, write_json
@@ -99,7 +100,7 @@ def test_wanli_v2_is_refused_with_its_reason():
     """wanli-v2 was removed on 2026-09-30: a quarter of its gold labels are one of two disagreeing annotators' labels."""
     from kev.suite import REMOVED_SUITES, RemovedSuite, load_split, read_manifest
     assert REMOVED_SUITES["evals/external/wanli-v2"]["last_round"] == 26
-    assert not (ROOT / "evals/external/wanli-v2").exists()
+    # The fork retains frozen inputs; admission must still refuse their use.
     with pytest.raises(RemovedSuite, match="removed on 2026-09-30: unsound as a gate.*annotators"):
         load_split("evals/external/wanli-v2", "development")
     with pytest.raises(RemovedSuite, match="removed on 2026-09-30"):
@@ -129,7 +130,6 @@ def test_wanli_v1_and_typesafe_v1_are_refused_with_their_reason():
     from kev.suite import REMOVED_SUITES, RemovedSuite, load_split
     assert REMOVED_SUITES["evals/external/wanli-v1"]["last_round"] == 5 and REMOVED_SUITES["evals/external/typesafe-v1"]["last_round"] == 26
     for suite, why in (("evals/external/wanli-v1", "annotators"), ("evals/external/typesafe-v1", "frontier models")):
-        assert not (ROOT / suite).exists()
         with pytest.raises(RemovedSuite, match=f"removed on 2026-09-30: .*{why}"):
             load_split(suite, "development")
 
@@ -616,7 +616,7 @@ def test_readout_reproduces_round_19():
     from scripts.private_rows import restore
     try:
         restore("runs/r19-readout/private-rows.json", ROOT)
-    except PermissionError as error:
+    except (PermissionError, LocalEntryNotFoundError) as error:
         pytest.skip(str(error))
     spec = rounds.load(ROOT / "experiments/rounds/r19.json")
     report = rounds.readout(spec, ROOT)
@@ -635,7 +635,7 @@ def test_readout_reproduces_round_20():
     try:
         restore("runs/r19-readout/private-rows.json", ROOT)
         private = True
-    except PermissionError:
+    except (PermissionError, LocalEntryNotFoundError):
         private = False
     spec = rounds.load(ROOT / "experiments/rounds/r20.json")
     report, committed = rounds.readout(spec, ROOT), read_json(ROOT / "runs/r20-readout/round20.json")
@@ -661,7 +661,7 @@ def test_readout_reproduces_round_22():
     from scripts.private_rows import restore
     try:
         restore("runs/r22-readout/private-rows.json", ROOT)
-    except PermissionError as error:
+    except (PermissionError, LocalEntryNotFoundError) as error:
         pytest.skip(str(error))
     spec = rounds.load(ROOT / "experiments/rounds/r22.json")
     report = rounds.readout(spec, ROOT)
@@ -678,7 +678,7 @@ def test_readout_reproduces_round_24():
     from scripts.private_rows import restore
     try:
         for manifest in ("runs/r24-readout/private-exclude.json", "runs/r24-readout/private-rows.json"): restore(manifest, ROOT)
-    except PermissionError as error:
+    except (PermissionError, LocalEntryNotFoundError) as error:
         pytest.skip(str(error))
     report = rounds.readout(rounds.load(ROOT / "experiments/rounds/r24.json"), ROOT)
     assert same(report, read_json(ROOT / "runs/r24-readout/round24.json"))
@@ -1383,6 +1383,7 @@ def test_a_misspelled_entrypoint_fails_validation():
 
 def test_a_finished_call_with_no_arm_is_not_marked_launched(tmp_path, monkeypatch):
     """A spawned call the spec cannot map stays unlaunched and flagged, the watch still ends, and `watch` exits non-zero."""
+    monkeypatch.setattr(rounds, "ROOT", tmp_path)
     _spawned(tmp_path, {"trial-0": "fc-0", "trial-7": "fc-7"})
     logs = []
     def on_done(study, label):

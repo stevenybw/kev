@@ -40,9 +40,10 @@ def resolve_run(run):
     with `@` (jaredpalmer/kev-4b@qwen3), downloaded to the HF cache. Returns a str path."""
     if os.path.isdir(run):
         return str(run)
-    from huggingface_hub import snapshot_download
+    from huggingface_hub import constants, snapshot_download
     repo, _, revision = str(run).partition("@")
-    return snapshot_download(repo, revision=revision or None, allow_patterns=["*.json", "*.safetensors", "*.pt", "*.txt", "*.jinja"])
+    return snapshot_download(repo, revision=revision or None, local_files_only=constants.HF_HUB_OFFLINE,
+                             allow_patterns=["*.json", "*.safetensors", "*.pt", "*.txt", "*.jinja"])
 
 
 @dataclass
@@ -230,12 +231,12 @@ class Checkpoint:
         exact = opts.dtype is torch.float32   # KEV_DTYPE=fp32: the caller wants the reported-numbers path, not a faster one
         return "mlx" if str(device) == "mps" and not exact and mlx_available() and self.hybrid_base() else "torch"
 
-    def load(self, device, opts=LoadOptions()):
+    def load(self, device, opts=LoadOptions(), *, tokenizer_path=None):
         """-> (tokenizer, model) in eval mode with the LoRA applied (or the full backbone loaded) and the pointer head loaded. The model is a
         DecisionModel (torch) or an MLXDecisionModel (backend mlx); both expose the same scoring interface."""
         meta = self.meta
         if self.full and opts.lora_scale != 1: raise ValueError("lora_scale interpolates an adapter; a full-weight checkpoint has none")
-        tok = load_tokenizer(meta.base, revision=meta.base_revision)
+        tok = load_tokenizer(tokenizer_path or meta.base, revision=None if tokenizer_path else meta.base_revision)
         m = self._load_mlx(tok, opts) if self.backend(device, opts) == "mlx" else self._load_torch(tok, device, opts)
         m.head.load_state_dict(meta.head); m.eval()
         m.head.temperature = meta.temperature if opts.temperature is None else opts.temperature

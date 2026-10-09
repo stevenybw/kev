@@ -7,12 +7,14 @@ import httpx, pytest
 pytestmark = pytest.mark.server
 
 BASE = os.environ.get("KEV_BASE_URL", "http://127.0.0.1:8008")
+API_KEY = os.environ.get("KEV_API_KEY", "local")
+HEADERS = {"Authorization": f"Bearer {API_KEY}"}
 
 DEPARTMENT = {"returns": "Exchanges, refunds, wrong or damaged items", "shipping": "Delivery status, delays, lost packages", "billing": "Charges, invoices, payment problems"}
 
 
 def post(body):
-    r = httpx.post(f"{BASE}/v1/systemone", json=body, timeout=120)
+    r = httpx.post(f"{BASE}/v1/systemone", json=body, timeout=120, headers=HEADERS)
     assert r.headers["x-typesafe-request-id"]   # every TypeSafe client exposes it as response.request_id
     return r.status_code, r.json()
 
@@ -90,7 +92,7 @@ def test_packed_equals_separate():
 def test_sdk_client():
     typesafe_sdk = pytest.importorskip("typesafe_sdk")
     from typesafe_sdk import Choice, Noul, Score, TypeSafeClient
-    with TypeSafeClient(api_key="local", base_url=BASE, model="kev-latest") as client:
+    with TypeSafeClient(api_key=API_KEY, base_url=BASE, model="kev-latest") as client:
         resp = client.system_one(state={"document": "I was charged twice. Please fix this ASAP."},
                                  questions={"billing": Noul(instructions="Is this ticket about billing?"),
                                             "tone": Choice(instructions="What is the customer's tone?", criteria={"calm": None, "frustrated": None, "angry": None}),
@@ -105,7 +107,7 @@ def test_sdk_models():
     """models.list() parses only when every card carries name, description and release_date."""
     pytest.importorskip("typesafe_sdk")
     from typesafe_sdk import TypeSafeClient
-    with TypeSafeClient(api_key="local", base_url=BASE, model="kev-latest") as client:
+    with TypeSafeClient(api_key=API_KEY, base_url=BASE, model="kev-latest") as client:
         cards = client.models.list().models
     assert {"kev-latest", "jev-latest"} <= {c.name for c in cards}   # jev-latest is the SDK's default model
     assert all(c.description and c.release_date for c in cards)
@@ -117,14 +119,14 @@ def test_sdk_async_client():
     from typesafe_sdk import AsyncTypeSafeClient, Noul
 
     async def go():
-        async with AsyncTypeSafeClient(api_key="local", base_url=BASE, model="kev-latest") as client:
+        async with AsyncTypeSafeClient(api_key=API_KEY, base_url=BASE, model="kev-latest") as client:
             return await client.system_one(state="I was charged twice.", questions={"billing": Noul(instructions="Is this about billing?")})
 
     assert 0 <= asyncio.run(go()).nouls["billing"].noul <= 1
 
 
 def card():
-    return httpx.get(f"{BASE}/v1/models", timeout=30).json()["models"][0]
+    return httpx.get(f"{BASE}/v1/models", timeout=30, headers=HEADERS).json()["models"][0]
 
 
 def over_length():
@@ -140,7 +142,11 @@ def test_over_length_state_is_refused_not_truncated():
     if card()["truncate_states"]: pytest.skip("server started with KEV_TRUNCATE_STATES=1")
     limit = card()["max_state_tokens"]
     code, body = post(over_length())
-    assert code == 422 and f"over the {limit:,}-token limit" in body["detail"] and "KEV_TRUNCATE_STATES=1" in body["detail"]
+    assert code == 422 and f"over the {limit:,}-token limit" in body["detail"]
+    if card()["backend"] == "torch-pp4":
+        assert "split" in body["detail"] and "KEV_TRUNCATE_STATES=1" not in body["detail"]
+    else:
+        assert "KEV_TRUNCATE_STATES=1" in body["detail"]
 
 
 def test_sdk_surfaces_the_over_length_refusal():
@@ -149,7 +155,7 @@ def test_sdk_surfaces_the_over_length_refusal():
     pytest.importorskip("typesafe_sdk")
     from typesafe_sdk import Noul, TypeSafeClient, TypeSafeUnprocessableEntityError
     if card()["truncate_states"]: pytest.skip("server started with KEV_TRUNCATE_STATES=1")
-    with TypeSafeClient(api_key="local", base_url=BASE, model="kev-latest") as client:
+    with TypeSafeClient(api_key=API_KEY, base_url=BASE, model="kev-latest") as client:
         with pytest.raises(TypeSafeUnprocessableEntityError) as refused:
             client.system_one(state=over_length()["state"], questions={"billing": Noul(instructions="Is this about billing?")})
     assert refused.value.status == 422 and "tokens, over the" in str(refused.value) and refused.value.request_id
@@ -163,6 +169,6 @@ def test_truncating_server_marks_every_response():
     from typesafe_sdk import Noul, TypeSafeClient
     code, body = post({"state": "I was charged twice.", "model": "kev-latest", "questions": {"billing": {"type": "noul", "instructions": "Is this about billing?"}}})
     assert code == 200 and body["truncated"] is False and body["usage"]["state_tokens"] == body["usage"]["state_tokens_used"] > 1
-    with TypeSafeClient(api_key="local", base_url=BASE, model="kev-latest") as client:
+    with TypeSafeClient(api_key=API_KEY, base_url=BASE, model="kev-latest") as client:
         resp = client.system_one(state="I was charged twice.", questions={"billing": Noul(instructions="Is this about billing?")})
     assert 0 <= resp.nouls["billing"].noul <= 1 and resp.usage.input_tokens == body["usage"]["input_tokens"]

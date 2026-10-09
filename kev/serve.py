@@ -15,7 +15,7 @@ import argparse, asyncio, atexit, hmac, os, queue, random, sys, threading, time,
 from concurrent.futures import Future
 import torch
 from dataclasses import dataclass, field, replace
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -90,8 +90,36 @@ class PrefixCache:
         self.entries.clear()
 
 
+class DecisionResponses:
+    """TypeSafe response conversion shared by schedulers that implement submit/probs.
+
+    Uses only the tokenizer and the explicit truncation policy of its server.
+    """
+    def answer(self, req):
+        """The /v1/systemone response body for one request."""
+        rec, meta = to_record(prepare(req))
+        return self._body(req, meta, *self.probs(rec))
+
+    async def answer_async(self, req):
+        """answer() for the event loop: a request waiting on the model thread holds no worker thread, so a container takes
+        as many concurrent requests as its batches can absorb (FastAPI runs sync endpoints on a 40-thread pool)."""
+        rec, meta = to_record(prepare(req))
+        return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec)))
+
+    def _body(self, req, meta, ps, m):
+        """The TypeSafe body. A server that may truncate (truncate_states) also says, on every response, whether it did:
+        `truncated`, and usage.state_tokens (the request's state) / state_tokens_used (what the model read), both counting
+        the <state> token. The TypeSafe SDKs ignore fields they do not model, so clients keep parsing."""
+        answers = to_answers(ps, meta)
+        body = {"model": req.model, "answers": answers, "usage": {"input_tokens": m["tokens"], "output_tokens": output_tokens(self.tok, answers)}, "latency_ms": m["latency_ms"]}
+        if self.truncate_states:
+            body["usage"].update(state_tokens=m["state_tokens"], state_tokens_used=m["state_tokens_used"])
+            body["truncated"] = m["state_tokens"] > m["state_tokens_used"]
+        return body
+
+
 @dataclass
-class Server:
+class Server(DecisionResponses):
     """The loaded checkpoint, the state-prefix cache (PrefixCache), and the one model thread that runs every forward pass.
 
     Request threads encode their record and queue it; the model thread takes everything queued when it becomes free and
@@ -197,27 +225,21 @@ class Server:
         while graphs is not None and graphs.capture_due(idle=True): time.sleep(0.01)
         with self.lock: pass                                   # a capture in progress finishes
 
-    def answer(self, req):
-        """The /v1/systemone response body for one request."""
-        rec, meta = to_record(prepare(req))
-        return self._body(req, meta, *self.probs(rec))
+    def model_card(self):
+        s = self
+        ck, meta = s.checkpoint, s.checkpoint.meta
+        card = {"description": f"Kev pointer head on {meta.base}, serving {ck.requested} at temperature {s.model.head.temperature:.2f}",
+                "release_date": s.release_date,
+                "run": ck.requested, "base": meta.base, "lora": meta.lora, "device": s.device, "backend": s.model.backend, "dtype": s.model.dtype,
+                "temperature": s.model.head.temperature, "max_state_tokens": SERVE_MAX_STATE, "truncate_states": s.truncate_states,
+                "cuda_graphs": graphs.stats() if (graphs := getattr(s.model, "graphs", None)) else None,
+                "prefix_cache": {"size": s.prefix_cache.size, "min_state_tokens": s.prefix_cache.min_tokens, "max_tokens": s.prefix_cache.max_tokens, "hits": s.prefix_cache.hits,
+                                 "misses": s.prefix_cache.misses, "cached_states": len(s.prefix_cache.entries), "oom_retries": s.prefix_cache.oom_retries},
+                "batches": {"count": s.batches, "requests": s.batched_requests, "queued": s.queue.qsize()}}
+        return card
 
-    async def answer_async(self, req):
-        """answer() for the event loop: a request waiting on the model thread holds no worker thread, so a container takes
-        as many concurrent requests as its batches can absorb (FastAPI runs sync endpoints on a 40-thread pool)."""
-        rec, meta = to_record(prepare(req))
-        return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec)))
-
-    def _body(self, req, meta, ps, m):
-        """The TypeSafe body. A server that may truncate (truncate_states) also says, on every response, whether it did:
-        `truncated`, and usage.state_tokens (the request's state) / state_tokens_used (what the model read), both counting
-        the <state> token. The TypeSafe SDKs ignore fields they do not model, so clients keep parsing."""
-        answers = to_answers(ps, meta)
-        body = {"model": req.model, "answers": answers, "usage": {"input_tokens": m["tokens"], "output_tokens": output_tokens(self.tok, answers)}, "latency_ms": m["latency_ms"]}
-        if self.truncate_states:
-            body["usage"].update(state_tokens=m["state_tokens"], state_tokens_used=m["state_tokens_used"])
-            body["truncated"] = m["state_tokens"] > m["state_tokens_used"]
-        return body
+    def healthy(self):
+        return not self.stopping.is_set() and self.thread.is_alive()
 
 
 def prepare(req):
@@ -239,6 +261,11 @@ async def typesafe(request, call_next):
         resp = await call_next(request)
     resp.headers["x-typesafe-request-id"] = request.headers.get("x-typesafe-request-id") or uuid.uuid4().hex
     resp.headers["server-timing"] = f"app;dur={(time.perf_counter() - started) * 1000:.1f}"   # time inside this process, for telling it from the network
+    s = getattr(app.state, "server", None)
+    if s is not None and getattr(s, "engine", None) is not None and request.url.path.startswith("/v1"):
+        import json
+        print(json.dumps({"request_id": resp.headers["x-typesafe-request-id"], "status": resp.status_code,
+                          "latency_ms": round((time.perf_counter() - started) * 1000, 1)}), flush=True)
     return resp
 
 
@@ -247,9 +274,23 @@ def server() -> Server:
 
 
 @app.post("/v1/systemone")
-async def systemone(req: SystemOneRequest):
+async def systemone(req: SystemOneRequest, request: Request):
     """TypeSafe-compatible endpoint: typed questions in, typed answers out, one prefill pass."""
-    return await server().answer_async(req)
+    s = server()
+    if getattr(s, "engine", None) is None:
+        return await s.answer_async(req)
+    work = asyncio.create_task(s.answer_async(req))
+    async def disconnected():
+        while True:
+            if (await request.receive())["type"] == "http.disconnect": return
+    disconnect = asyncio.create_task(disconnected())
+    try:
+        finished, _ = await asyncio.wait((work, disconnect), return_when=asyncio.FIRST_COMPLETED)
+        if work in finished: return work.result()
+        raise HTTPException(499, "client disconnected")
+    finally:
+        work.cancel(); disconnect.cancel()
+        await asyncio.gather(work, disconnect, return_exceptions=True)
 
 
 class PermuteSystemOne(BaseModel):
@@ -299,17 +340,22 @@ def truncation_marks(body, part):
 def models():
     """One TypeSafe model card (name, description, release_date) per accepted model name, plus the Kev serving details
     a client may ignore: the run, the base, the device, the backend and precision, the temperature, prefix-cache stats."""
-    s = server()
-    ck, meta = s.checkpoint, s.checkpoint.meta
-    card = {"description": f"Kev pointer head on {meta.base}, serving {ck.requested} at temperature {s.model.head.temperature:.2f}",
-            "release_date": s.release_date,
-            "run": ck.requested, "base": meta.base, "lora": meta.lora, "device": s.device, "backend": s.model.backend, "dtype": s.model.dtype,
-            "temperature": s.model.head.temperature, "max_state_tokens": SERVE_MAX_STATE, "truncate_states": s.truncate_states,
-            "cuda_graphs": graphs.stats() if (graphs := getattr(s.model, "graphs", None)) else None,
-            "prefix_cache": {"size": s.prefix_cache.size, "min_state_tokens": s.prefix_cache.min_tokens, "max_tokens": s.prefix_cache.max_tokens, "hits": s.prefix_cache.hits,
-                             "misses": s.prefix_cache.misses, "cached_states": len(s.prefix_cache.entries), "oom_retries": s.prefix_cache.oom_retries},
-            "batches": {"count": s.batches, "requests": s.batched_requests, "queued": s.queue.qsize()}}
+    card = server().model_card()
     return {"models": [{"name": name, **card} for name in MODEL_NAMES]}
+
+
+@app.get("/healthz")
+def health():
+    s = getattr(app.state, "server", None)
+    ok = s is not None and s.healthy()
+    return JSONResponse({"status": "ok" if ok else "unavailable"}, 200 if ok else 503)
+
+
+@app.get("/readyz")
+def ready():
+    s = getattr(app.state, "server", None)
+    ok = s is not None and s.healthy() and getattr(s, "ready", True)
+    return JSONResponse({"status": "ready" if ok else "unavailable"}, 200 if ok else 503)
 
 
 def main():
@@ -318,9 +364,31 @@ def main():
     ap.add_argument("--fallback", default="runs/smoke")
     ap.add_argument("--host", default="127.0.0.1", help="interface to bind; 0.0.0.0 to serve beyond this machine (a container, a VM behind a proxy)")
     ap.add_argument("--port", type=int, default=8008)
+    ap.add_argument("--pipeline-parallel", type=int, choices=(1, 4), default=1)
+    ap.add_argument("--tokenizer-path", help="verified local tokenizer directory, for offline loading")
     a = ap.parse_args()
     run = a.run if is_hub_id(a.run) or os.path.exists(f"{a.run}/head.pt") else a.fallback
     if run != a.run: print(f"{a.run} not found, falling back to {run}")
+    if a.pipeline_parallel == 4:
+        if run != a.run: ap.error("PP4 requires an explicit existing checkpoint")
+        from .pp4 import PipelineServer
+        service = PipelineServer(run, tokenizer_path=a.tokenizer_path)
+        try:
+            service.warmup()
+            app.state.server = service
+            def supervise():
+                while True:
+                    time.sleep(1)
+                    if service.engine.failed:
+                        print("PP4 stage failed; restarting service", file=sys.stderr, flush=True)
+                        os._exit(1)
+                    if service.stopping.is_set(): return
+            threading.Thread(target=supervise, name="kev-pp4-supervisor", daemon=True).start()
+            import uvicorn
+            uvicorn.run(app, host=a.host, port=a.port, workers=1, access_log=False, timeout_graceful_shutdown=10)
+        finally:
+            service.close()
+        return
     dev = default_device()
     opts = LoadOptions.from_env()
     if dev == "mps" and opts.attn is None: opts = replace(opts, attn="sdpa")   # serving default on Apple GPUs (parity measured)
@@ -330,7 +398,7 @@ def main():
     if fused_default: opts = replace(opts, fused=fused_available())   # serving default: fused Qwen3.5 kernels, ~1/3 less GPU time per batch (kev.fused_qwen35), when fla is installed; KEV_FUSED=0 to decline, KEV_FUSED=1 to insist
     if opts.backend is None: opts = replace(opts, backend="auto")   # serving default: MLX for the hybrid Qwen3.5 checkpoints on Apple Silicon (LoadOptions.backend); KEV_BACKEND=torch to decline
     ck = Checkpoint(run)
-    tok, model = ck.load(dev, opts)
+    tok, model = ck.load(dev, opts, tokenizer_path=a.tokenizer_path)
     if fused_default and not opts.fused and model.hybrid: print("fused Qwen3.5 kernels off: install the flash-linear-attention version kev/fused_qwen35.py pins (FLA_VERSION) to turn them on")
     app.state.server = Server(ck, tok, model, dev)
     print(f"serving {ck.requested} ({ck.path}) on {dev} via {model.backend} ({model.dtype}) {a.host}:{a.port}; states over {SERVE_MAX_STATE:,} tokens "

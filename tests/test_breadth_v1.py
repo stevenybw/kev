@@ -7,6 +7,7 @@ import struct
 from pathlib import Path
 
 import pytest
+from huggingface_hub.errors import LocalEntryNotFoundError
 
 from kev.benchmark import labels
 from kev.data import materialize
@@ -275,7 +276,7 @@ def private_partitions():
     skip for an account without access to it."""
     try:
         return {"development": load_split(SUITE, "development"), "test": load_split(SUITE, "test", allow_test=True)}   # structure only, no scoring
-    except PermissionError as error:
+    except (PermissionError, LocalEntryNotFoundError) as error:
         pytest.skip(f"breadth-v1 partitions are private: {error}")
 
 
