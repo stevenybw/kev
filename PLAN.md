@@ -7,24 +7,67 @@ through night 3, rounds 4-18) is frozen at the git tag `research-archive-2026-09
 `A:PLAN_27b.md`, the Kev-27B plan). How to run an unattended research session is in
 [`docs/autoresearch.md`](docs/autoresearch.md).
 
-## Where we stand (2026-09-29)
+## Where we stand (2026-09-30)
 
 ### The released family
 
 All four are public in the [Kev collection](https://huggingface.co/collections/jaredpalmer/kev-6aad9d0ea49f2589665e07cd).
-Kev-4B round 10 and Kev-0.8B round 15 were released and Kev-27B made public on 2026-09-24 (docs in PR #106).
+Kev-4B round 10 and Kev-0.8B round 15 were released and Kev-27B made public on 2026-09-24 (docs in PR #106). Kev-27B v2
+(round 23's `27b-k-w85`, full weights) replaced it on 2026-09-30; v1 (the LoRA adapter) stays at `jaredpalmer/kev-27b@v1-lora`
+("Released: Kev-27B v2"). Kev-9B v2 (round 27's `9b-r18a`) replaced Kev-9B the same day; v1 stays at `jaredpalmer/kev-9b@v1`
+("Released: Kev-9B v2"). These four were released together as Kev 1.0 on 2026-10-01 (below; "Released: Kev 1.0").
 
 | model | checkpoint | T | locked transfer-v4: acc / Brier | other confirmation reads (once each) | JevBench public: all / hard (hard ECE) |
 |---|---|---|---|---|---|
-| Kev-27B | `r6-27b-v2/01-trial-1` (B1 v2 seed 2), `Qwen/Qwen3.8-27B@1d4bf0f2` (post-trained), Hub `01b81998` | 1.38 | **0.896 / 0.160** | decision-v7 locked 0.870; transfer-r6 test 0.863 vs Kev-9B 0.842 (+2.1 pp [+0.35, +3.8]); longstate-v3 0.833 vs 0.556 | **0.866 / 0.721** (0.128) |
-| Kev-9B | `night2-9b-du/00-trial-0` (v7 + dates/unknowable delta) | 2.30 | 0.852 / 0.237 | - | 0.762 / 0.568 (0.19) |
+| Kev-27B v2 | round 23 `27b-k-w85` (0.85 round-22 full-weight SFT + 0.15 v1, SFT head), full bf16 weights `d27af6ab…`, `Qwen/Qwen3.8-27B@1d4bf0f2` (post-trained), Hub `28be62e9` (weights) | 1.32 (pool) | **0.889 / 0.154** | vs v1: breadth-v1 test +1.2 [+0.3, +2.2]; tasksource-heldout-v1 test +5.3 [+3.7, +6.8]; pooled hard / devtools / documents test +8.9 [+7.5, +10.3]; locked −0.8 [−2.0, +0.5]; CUAD test −1.6 [−3.0, −0.3], ECE 0.053 vs 0.007 | not read |
+| Kev-27B v1 (tag `v1-lora`) | `r6-27b-v2/01-trial-1` (B1 v2 seed 2), LoRA, Hub `01b81998` | 1.38 | 0.896 / 0.160 | decision-v7 locked 0.870; transfer-r6 test 0.863 vs Kev-9B 0.842 (+2.1 pp [+0.35, +3.8]); longstate-v3 0.833 vs 0.556 | **0.866 / 0.721** (0.128) |
+| Kev-9B v2 | round 27 `9b-r18a` (`r18-9b/00-trial-0`: v1 + one epoch on documents-v1 + hard-v1 + devtools-v1, replay 10,000), Hub `b5d8c18e` | 2.19 (pool) | **0.852 / 0.199** | vs v1: hard-v1 + devtools-v1 test +18.7 [+16.7, +20.8]; documents-v1 test +7.1 [+4.7, +9.2]; locked +0.0 [−1.7, +1.8] | not read |
+| Kev-9B v1 (tag `v1`) | `night2-9b-du/00-trial-0` (v7 + dates/unknowable delta), Hub `2629c06a` | 2.30 | 0.852 / 0.224 | - | 0.762 / 0.568 (0.19) |
 | Kev-4B | `r10-skills/00-trial-0` (night2 + documents-v1 (round 8) + hard-v1 & devtools-v1 (round 10)), Hub `139fdd94` | 2.41 | 0.838 / 0.224 | hard-v1 test 0.540 → 0.803; devtools-v1 test 0.623 → 0.756 | 0.758 / 0.541 (0.112) |
 | Kev-0.8B | `r15-08b/00-trial-0` (night2 + documents-v1, hard-v1, devtools-v1 in one delta), Hub `9a45d25e` | 2.35 | 0.697 / 0.397 | documents-v1 test 0.608 → 0.851; hard-v1 test 0.396 → 0.665; devtools-v1 test 0.472 → 0.637; documents-v2 (private) 0.848 | 0.636 / 0.360 (0.181) |
 | Jev (reference) | hosted | - | transfer-v4 dev 0.857 (never locked) | - | 0.866 / 0.741 (0.06; their board, tiers include held-out items) |
 
-T is the temperature in `head.pt`, fitted on the trial's decision-v7 development rows; locked Brier is served at that T.
-Evidence: `runs/release/kev-{27b-v2,4b-r10,08b-r15}.json`, `experiments/releases/*.json`, `runs/jevbench-public/`, the model
-cards. Previous weights are Hub tags (`kev-4b@r8-documents-release`, `kev-4b@night2-du-release`, `kev-0.8b@night2-du-release`, `@v7-base`).
+T is the temperature in `head.pt`, fitted on the trial's decision-v7 development rows (Kev-27B v2 and Kev-9B v2: their rounds'
+registered pool of held-out datasets, 648 questions; round 28 tested the same pool for Kev-4B and Kev-0.8B and kept the shipped
+T); locked Brier is served at that T.
+Evidence: `runs/release/kev-{27b-r23,27b-v2,9b-r27,4b-r10,08b-r15}.json` (`kev-27b-v2` = v1's B1 v2 records), `experiments/releases/*.json`,
+`runs/release/kev-27b-r23-published.json`, `runs/jevbench-public/`, the model cards. Previous weights are Hub tags (`kev-27b@v1-lora`,
+`kev-4b@r8-documents-release`, `kev-4b@night2-du-release`, `kev-0.8b@night2-du-release`, `@v7-base`).
+
+### Kev 1.0 baseline (released 2026-10-01)
+
+**Kev 1.0 is the baseline Kev 2 is measured against.** A Kev 2 candidate at a given size is compared with the Kev 1.0
+checkpoint of that size on identical items, at each side's shipped temperature, and the 1.0 reads below are its parent reads.
+Kev 1.0 trains nothing: it versions the four released checkpoints with their formal cards (PR #206). Load a parent as
+`jaredpalmer/kev-<size>@v1.0`; the GitHub release `kev-1.0` has the three adapter tarballs and Kev-27B is on the Hub only
+("Released: Kev 1.0", `runs/release/kev-1.0.json`).
+
+| size | checkpoint (trial) | Hub revision (weights) | T (fit) | locked transfer-v4 acc / Brier | breadth-v1 test index (all 14) | transfer-v4 dev | validated context |
+|---|---|---|---|---|---|---|---|
+| Kev-0.8B | `r15-08b/00-trial-0` | `9a45d25e` | 2.35 (in-distribution; kept by round 28) | 0.697 / 0.397 | 23.3 [21.2, 25.9] | 0.648 | 8,192 (16k lower bound −8.5 pp, `runs/r28-readout/context.json`) |
+| Kev-4B | `r10-skills/00-trial-0` | `139fdd94` | 2.41 (in-distribution; kept by round 28) | 0.838 / 0.224 | 38.0 [35.5, 41.3] | 0.817 | 8,192 (16k lower bound −3.4 pp, `runs/r28-readout/context.json`) |
+| Kev-9B v2 | `r18-9b/00-trial-0` (round 27 `9b-r18a`) | `b5d8c18e` | 2.19 (held-out pool) | 0.852 / 0.199 | 41.0 [38.8, 43.9] | 0.820 | 8,192 (16k lower bound −3.7 pp, `runs/r28-readout/context.json`) |
+| Kev-27B v2 | round 23 `27b-k-w85` | `28be62e9` (`v1.0` = `af0e6d55`: card commits since) | 1.32 (held-out pool) | 0.889 / 0.154 | 52.3 [49.2, 55.4] | 0.851 | 65,536 (64k lower bound −2.4 pp, `runs/r28-readout/context.json`) |
+| Jev (reference) | hosted | – | – | not read | 54.0 [51.2, 57.0] | 0.857 | – |
+
+- Index: `runs/fam-breadth-test-report/report.json` (2026-09-30 family reads; Kev-27B v2's row is round 23's
+  `r23c-27b-cand-breadthtest`) and, for Jev, `runs/r23-breadth-report/report.json`. Locked reads: `runs/locked/kev-{08b-r15,
+  4b-r10,9b-r27,27b-r23}-ungated`. Everything else on each size's card (`docs/model-cards/`), traced in `docs/claims.json`.
+- Held-out-dataset panels a Kev 2 rule should read against these parents: breadth-v1 dev / test (audited: without `routerbench`,
+  `cfcolor`, `humicroedit`, `chessbench`), tasksource-heldout-v1 dev (without the seven private families; 4B 0.677, 0.8B 0.515
+  at shipped T, `runs/r28-readout/round28.json`; 9B v2 0.706 at the pool T = its shipped T, `runs/r29-readout/round29.json`; 27B test 0.795), transfer-v4 dev, and the
+  locked transfer-v4 test, read once per candidate. The breadth-v1 test and tasksource-heldout-v1 test partitions have been
+  read for the 27B (round 23/24) and breadth-v1 test for every size (family reads): a Kev 2 confirmation on them is a second
+  read and weaker evidence than a fresh panel.
+- Validated context (report only, round 28's rule): the largest nominal bucket from 16k whose paired CUAD accuracy
+  difference from the 8k bucket has a 95 % lower bound ≥ −3 pp (and every bucket below it too); 8,192 if 16k fails. Values
+  from phase B's longdoc-v1 development reads (Kev-27B: round 23's `r23-27b-k-w85-longdoc`), `runs/r28-readout/context.json`:
+  8,192 for Kev-0.8B, Kev-4B and Kev-9B v2 (each fails at 16k: lower bounds −8.5, −3.4, −3.7 pp; at 32k all three are
+  measurably below 8k) and 65,536 for Kev-27B v2 (64k lower bound −2.4 pp).
+- Known gaps a Kev 2 should be judged on: in-distribution gains (hard / devtools / documents splits are trained on), CUAD
+  calibration at 27B (ECE 0.053 vs v1's 0.007), date arithmetic below 27B (`deadline` 0.35 / 0.65 / 0.725, Jev 0.95), Kev-0.8B's
+  When2Call regression (test 0.133), Kev-4B / 0.8B temperatures fitted in distribution, and no Mac measurement of Kev-9B or
+  Kev-27B.
 
 ### Against Jev and outside models
 
@@ -91,9 +134,13 @@ cards. Previous weights are Hub tags (`kev-4b@r8-documents-release`, `kev-4b@nig
   criteria. The lr 2e-6 arms also fail short-state accuracy and the breadth primary. Replay held short states at lr 1e-6
   (−0.3 to −0.8 pp) and CUAD accuracy held on development, but CUAD ECE still rose (0.087-0.103 against 0.063). Against
   round 23's confirmed `27b-k-w85` (report only), no arm is ahead on any gated panel. Nothing was confirmed or released.
-- **Round 26** is registered (2026-09-29) and launched: round 25's lr 1e-6 arm (same merged Kev-27B init, same plan) with
-  one change, tasksource-v1 doubled on `sft-v2-r26` (58,515 records = sft-v2-r25 + 13,000 tasksource-v1, 26,000 in all
-  over the 119 families), one study, 4 candidates, round 24's audited rule and confirmation verbatim ("Round 26 (registered)").
+- **Round 26** (round 25's lr 1e-6 arm, same merged Kev-27B init and plan, with one change: tasksource-v1 doubled on
+  `sft-v2-r26`, 58,515 records; 4 candidates) is read out: **no candidate** (0 of 4; "Round 26 result"). The study trained
+  in one attempt (1.62 h). The final, `27b-lr1e6`, passes 11 of 12 criteria and fails only breadth-v1 ECE (0.0233 against a
+  bar of 0.0176), like round 25's final (0.0235). The snapshots also fail the breadth primary (lower bounds −0.16 to −0.04
+  pp), and s50 fails short-state accuracy. Doubling tasksource-v1 did not move breadth: against round 25's lr 1e-6 final
+  (report only, same fraction of the run) breadth +0.2 [−0.3, +0.7], tasksource-heldout +0.5 [−0.5, +1.5], breadth ECE
+  −0.000. Against `27b-k-w85` (report only) no arm is ahead on any gated panel. Nothing was confirmed or released.
 - **Round 17** (27B skills delta from Kev-27B with replay 10,000, study `r17-27b`, spec `experiments/rounds/r17.json`).
   Arm (a), lr 2e-5, is read out (`runs/r17-readout/round17.json` in the research checkout, not yet committed anywhere) and
   is **not a candidate**: primary +12.1 [+10.4, +13.9] (hard-v1 dev 0.733 → 0.895, +16.2 [+13.5, +19.0]; devtools-v1 dev
@@ -106,9 +153,22 @@ cards. Previous weights are Hub tags (`kev-4b@r8-documents-release`, `kev-4b@nig
 - **scienthoon removed** (2026-09-27): `evals/external/scienthoon-v1` is no longer a Kev eval; past verdicts stand, and from
   round 23 there is no scienthoon read or guard ("scienthoon removed" below). Round 24's audited rule, which round 23 now
   follows, gates no pooled externals: SemIf, WANLI-v2 and TypeSafe are reported.
-- Decisions waiting on Jared: upload the documents-v1 and hard-v1 train partitions to `jaredpalmer/kev-suites` and bump
-  `SUITES_REVISION` (see Next); submit Kev-27B (and the new 4B / 0.8B) to the Decision Index.
-- Spend: Modal metered $4,461.42 at 2026-09-29T06:00Z after round 25's last read (+$494.5 over its registration reading
+- **Kev-27B v2 released** (2026-09-30, Jared's approval): round 23's `27b-k-w85`, T 1.32, is `jaredpalmer/kev-27b` main
+  (weights commit `28be62e9`, card `0d7f9b49`); v1 is tag `v1-lora` ("Released: Kev-27B v2").
+- **documents-v1 and hard-v1 train partitions published** (2026-09-30): both are in `jaredpalmer/kev-suites` at
+  `cc4bac80` (`SUITES_REVISION`), so Kev-4B's and Kev-0.8B's training data is fetchable (Next, item 3).
+- **Rounds 28 and 29** (Kev 1.0 prep, no training). Phase A of their sweep (68 short-state development reads, PR #203) is
+  done. **Round 28 is read out: no candidate at either size** (`runs/r28-readout/round28.json`), so Kev-4B keeps T 2.41 and
+  Kev-0.8B T 2.35. `4b-r10` (pool T 2.297 [2.047, 2.520]) fails both primary conditions: Brier −0.0001 [−0.0005, +0.0003], ECE
+  0.0252 against 0.0240. `08b-r15` (pool T 2.520 [2.194, 2.828]) passes both (ECE 0.0375 against 0.0484, Brier −0.0020 [−0.0025,
+  −0.0014]) and fails the hard-v1, devtools-v1 and documents-v1 ECE guards (+0.011, +0.007, +0.020 against a tolerance of 0.005).
+  The long-state memory wall that blocked phase B is fixed (PR #202). Phase B's longdoc-v1 reads of the released checkpoints
+  gave every size its validated context length (report only, `runs/r28-readout/context.json`): 8,192 for Kev-0.8B, 4B and
+  9B v2, 65,536 for Kev-27B v2. **Round 29: no candidate; Kev-9B v2 stands** (`runs/r29-readout/round29.json`; every arm fails the tasksource-heldout-v1 primary, v2 also breadth-v1; ten arms' longdoc reads stopped for the budget, which cannot change the verdict). See "Round 28 (registered)" and "Round 29 (registered)".
+- Decisions waiting on Jared: submit Kev-27B (and the new 4B / 0.8B) to the Decision Index.
+- Spend: Modal metered $4,558.69 at 2026-09-29T13:01Z after round 26's last read (+$104.88 over its launch reading of
+  $4,453.81; the 11:17Z reading was $4,650.37, +$196.56, and was revised down by 12:56Z; night ceiling ≈ $5,980, hard stop
+  $5,700). $4,461.42 at 2026-09-29T06:00Z after round 25's last read (+$494.5 over its registration reading
   of $3,966.94; night ceiling ≈ $5,980, hard stop $5,600). Earlier: ~$3,790 (+~$80 of metering lag) at round 23's re-registration reading, 2026-09-28, after round
   24's confirmation (workspace-wide; night ceiling $5,000 metered). $3,571.88 at 2026-09-27T13:32Z (round 23's first
   registration reading; round 22 +$903.36 over its registration reading, workspace-wide). $2,668.52 at 2026-09-26T13:42Z (round 22's registration reading: round 21's failed trials and parent
@@ -248,9 +308,11 @@ These are the methods that held up. `docs/autoresearch.md` turns them into an op
   keep their registered rules and committed rows (`kev.rounds validate` lists the read as archived; read-outs reproduce from
   the rows). `load_split` refuses the suite, and `validate` / `launch` refuse any later round that names it.
   `evals/external/scienthoon-v1` was removed on 2026-09-27 (last read: round 22; "scienthoon removed" below). From round 23
-  there is no scienthoon guard. There is no pooled-externals guard either: SemIf, WANLI-v2 and TypeSafe are reported, not
+  there is no scienthoon guard. There is no pooled-externals guard either: SemIf, WANLI-v2 and TypeSafe were reported, not
   gated. The 2026-09-27 audit found that panel unsound without scienthoon (81 % WANLI, split-half r 0.08; round 24),
-  and round 23 was re-registered on round 24's rule.
+  and round 23 was re-registered on round 24's rule. `evals/external/wanli-v2`, `wanli-v1` and `typesafe-v1` were removed on
+  2026-09-30 (last read: round 26, round 5 for wanli-v1; "WANLI and TypeSafe removed" below). From round 27 SemIf is the only
+  external read, report only.
 - **Budgets and state.** A spend authorization per session, checked before every launch against metered spend plus running
   admission bounds; a state file with every spawn id, bound, pull and read.
 - **Report negative results as fully as positive ones**, in PLAN.md, with the failed criterion.
@@ -1019,6 +1081,42 @@ What changes and what does not:
   (Superseded on 2026-09-28: round 24's audited rule gates no pooled externals, and round 23 was re-registered on it, so
   the three suites are reported, not gated; standing rules.)
 
+## WANLI and TypeSafe removed (2026-09-30)
+
+Jared removed `evals/external/wanli-v2`, `evals/external/wanli-v1` and `evals/external/typesafe-v1` from Kev on 2026-09-30,
+with their builder (`scripts/freeze_semif_external.py`) and `scripts/compare_typesafe.py`; they remain in git history. The
+2026-09-27 audit had already made them report-only (round 24's rule). The check that removed them:
+- *WANLI (v2: 1,002 pairs, v1: SemIf's 256).* WANLI publishes each test pair's two crowd annotations
+  (`anonymized_annotations.jsonl` at the pinned revision `61c95318`). The two annotators disagree on 271 of wanli-v2's 1,002
+  pairs (27 %) and 63 of wanli-v1's 256 (25 %), and the published gold is always one of the two labels: on those pairs the
+  gold is a coin flip between people. Every Kev scores far lower there (development rows, as served):
+
+  | | agreed (731) | disputed (271) |
+  |---|---|---|
+  | Kev-27B v2 (`runs/r23-27b-k-w85-wanli2`) | 0.808 | 0.616 |
+  | Kev-9B | 0.802 | 0.572 |
+  | Kev-4B | 0.767 | 0.491 |
+  | Kev-0.8B | 0.644 | 0.487 |
+
+  Round 18's 9B arm (a), which failed the WANLI-v2 guard, is −0.6 pp on the agreed pairs and −3.0 pp on the disputed ones
+  against the released Kev-9B. The audit had measured split-half r 0.04 across 23 checkpoints, all within 0.735-0.763, a
+  half-width (1.95-2.10 pp) as wide as the 2 pp bar and ~11 % invalid labels.
+- *TypeSafe (`typesafe-v1`, 102 questions over 20 cases, 89 answered at the 8k context they were scored under).* The gold is
+  the argmax of TypeSafe's reference distribution, which evals.typesafe.ai describes as the average of two closed frontier
+  models' answers (GPT-6 Astra and Claude Fable 5.1, high thinking). It measures agreement with those models, not correctness,
+  and 13 of the 102 references put their answer below 0.75 (the two split). Across 20 Kev-27B checkpoints the split-half
+  correlation is −0.01 (audit: −0.27), 70 of the 89 are right for all of them, and the rest does not rank checkpoints.
+- *SemIf (`semif-v1`, 144 authored decisions) stays, report only.* Its labels hold up: of the 14 questions some Kev-27B
+  checkpoint misses, the misses are genuine hard cases (neither candidate authorises the action, so the answer is
+  insufficient), not label errors. But it is saturated (0.931-0.979 across 20 Kev-27B checkpoints, 130 of 144 right for all,
+  split-half r 0.19), so it is a sanity check, not a ranking.
+
+What changes and what does not: past verdicts stand as registered (rounds 5-26 read these suites; their read-outs and
+confirmations reproduce from the committed rows, `kev.suite.REMOVED_SUITES` archives the reads). From round 27 no round
+may read them. The README's external table keeps SemIf only; the model cards keep their WANLI and TypeSafe figures as the
+record. Round 18's 9B arm (a) failed only WANLI-v2, scienthoon and the pooled externals, all now removed or ungated; whether
+it is a Kev-9B candidate is a question for a new registered round on round 24's rule, not a re-reading of round 18.
+
 ## Round 24 (registered)
 
 ### Round 24 - retrospective selection: the audit's verdicts as one rule, applied to every full-weight 27B checkpoint (registered with this spec's commit, written before any computation under it)
@@ -1760,6 +1858,92 @@ checkpoint to pass a registered confirmation. It is not published. If it is rele
 - it is still 0.85 round 22's final, and the blend recovered almost none of Kev-27B's short-state or CUAD behaviour
   ("What the blends did").
 
+## Released: Kev-27B v2 (2026-09-30)
+
+Jared approved the release on 2026-09-30. Kev-27B v2 (round 23's `27b-k-w85`, internal id `kev-27b-r23`) is now
+`jaredpalmer/kev-27b` main, public; v1 (the B1 v2 LoRA adapter) is tag `v1-lora`. Record:
+`runs/release/kev-27b-r23-published.json`.
+
+- **v1 first.** Before any upload, the repo's main was checked to be `01b81998…` and tagged `v1-lora` (annotated tag object
+  `512eeb74…`), which resolves to `01b81998` for an anonymous client.
+- **Upload.** `modal_app.py::release_publish --public --confirm-public jaredpalmer/kev-27b --replace` (a CPU container, app
+  `kev-release`; the private default stays and `--public` needs the repo named twice) ran `kev.publish` on
+  `/runs/release/kev-27b-r23/checkpoint`: commit **`28be62e9`**. `kev.publish --replace` (new) deletes every file the upload
+  does not carry in the same commit (`upload_folder(delete_patterns="*")`), so v1's `adapter_config.json`,
+  `adapter_model.safetensors`, `result.json`, `provenance.json`, `train.log`, `training_config.json` and
+  `training_metrics.json` went in the commit that added the shards; without `--replace`, a full-weight upload into a repo
+  holding an adapter is now refused, because the loader rule would pick the adapter. The Hub's LFS hashes give weights
+  `d27af6ab…` and `head.pt` `7968f17b…`, the release copy's. Card metadata: `base_model: Qwen/Qwen3.8-27B`,
+  `base_model_relation: finetune`, `library_name: transformers`. The card went up without its verification line, which
+  was added in a README-only commit after the check below (`0d7f9b49`, main since).
+- **Anonymous verification.** `modal_app.py::release_verify` (new): an H200 with no Modal secret, no `kev-hf-cache` volume,
+  a fresh `HF_HOME` and no token (`get_token()` is None in every job). `jaredpalmer/kev-27b` resolved to the full-weight
+  layout at T 1.3195 with weights `d27af6ab…`. Served reads reproduced round 23's reads row for row: semif-v1 252 of 252
+  and transfer-v4 development 764 of 764 rows have logits equal to the committed raw logits times fp32(1/T) bit for bit
+  (`scripts/compare_release_rows.py`). A first decision-v7 development read of v2 (report only; the README's trained-sources
+  cell) gives 0.865 (v1 0.866). `jaredpalmer/kev-27b@v1-lora` resolves to v1's adapter (`41bf5af0…`) at T 1.3819 and
+  scores semif-v1 0.972 with argmax equal on 252 of 252 rows to the 2026-09-23 read; its logits are not bit-identical to
+  that read (max |Δp| 0.032). The cause is causal-conv1d's CUDA kernel, which #125 added to the Modal image after that read;
+  kev's code is not involved (`runs/drift-v1/REPORT.md`). Rows and reports:
+  `runs/rel27-public/`.
+- **Docs.** `docs/model-cards/kev-27b.md` is now v2's card (the candidate card, without the candidate wording, with a
+  "Previous version" note for `@v1-lora`; every limitation and the post-hoc caveat kept); `kev-27b-v2.md` is gone. README
+  (Models row, text, Serving H200 row from `runs/serving-27b-r23`), the family figures, kev-deploy's GPU notes and
+  `docs/claims.json` follow. The collection already listed `jaredpalmer/kev-27b`. The Space serves 4B / 0.8B and is
+  unchanged. GitHub release `kev-family`: `kev-27b.tar.gz` (v1's adapter) removed, `SHA256SUMS.txt` regenerated for the
+  three remaining tarballs (each re-verified), notes updated (v2 is on the Hub only: 51 GB exceeds the 2 GB asset limit).
+- **Spend.** Modal metered $4,574.06 at 2026-09-30T17:49Z before the upload and $4,575.82 at 18:23Z after it and the
+  verification (metering lags; app `kev-release`: one CPU upload, one H200 container of about 40 minutes, plus a first attempt of about 10 minutes that failed on an existing output directory after loading).
+
+### Release candidate (2026-09-28, private; the staging record)
+
+Round 23's confirmed candidate `27b-k-w85` is staged as a **private** release candidate, **Kev-27B v2**, for Jared's review
+(2026-09-28). Nothing is public: no public repository or revision, no public card, no README, Space or collection change,
+no GitHub release. Kev-27B (`jaredpalmer/kev-27b@01b81998`) stays the released 27B model until Jared decides. The internal
+release id is `kev-27b-r23`, because `kev-27b-v2` already names the released Kev-27B's records (B1 v2:
+`experiments/releases/kev-27b-v2.json`, `runs/release/kev-27b-v2.json`, `/runs/release/kev-27b-v2` on the volume). Record:
+`runs/release/kev-27b-r23-staging.json`.
+
+- **Volume copy.** `modal_app.py::release_copy` (new; `scripts/release_checkpoint.py`, a CPU container, app `kev-release`)
+  copied `/runs/r23-wise/27b-k-w85/checkpoint` to `/runs/release/kev-27b-r23/checkpoint`. It refuses an existing
+  destination. The copy's weights sha256 equals the source's, `d27af6ab…` (the round's `interpolation.json`): 11 shards,
+  17 files, 51.3 GB. The source is untouched; its `head.pt` is still `1a62fa3b…` at T 1.0.
+- **Release temperature.** `scripts/calibrate_checkpoint.py` fitted T on the copy's `head.pt` (pulled, fitted, put back),
+  with the round's registered pool rows: `r3cal` limited to its eight sources, `v9` limited to `mmlu_pro`, and the `transfer4`
+  records excluded, 648 questions. It found no conflict with training. It gives **T 1.3195**, the round's pool fit exactly.
+  Out-of-fold ECE (5 group-disjoint folds) goes from 0.048 to 0.038, and the intervals overlap. The 90 % interval of T is
+  [1.20, 1.45]. The written `head.pt` (`7968f17b…`) is byte-identical to the monitor's copy.
+- **Private Hub candidate.** `modal_app.py::release_publish` (new; `kev.publish --private` in a CPU container, so the weights
+  never reach the laptop) uploaded the copy to `jaredpalmer/kev-27b-v2-candidate`, commit `0dd33bcc`. With `--private`,
+  `kev.publish` now creates a missing repo private and refuses an existing public one (`kev.mirror.ensure_private`). It
+  also links full-weight shards into its staging directory instead of copying 51 GB, and uploads `interpolation.json`.
+  The repo is private. The Hub's LFS hashes give the same weights sha256 (`d27af6ab…`) and `head.pt` (`7968f17b…`).
+  `base_model_relation: finetune`: every weight derives from fine-tunes of the one base. The Hub's `merge` relation is
+  for merges of several listed base models, and Kev-27B is an adapter of the same base.
+- **Verification.** An authenticated load from the Hub (`kev.checkpoint`, H200,
+  `benchmarks --jobs jaredpalmer/kev-27b-v2-candidate@0dd33bcc@evals/external/semif-v1@rel27-hub-semif`) reproduced round 23's
+  semif-v1 read row for row. All 252 rows are served at T 1.3195, and their logits equal the committed raw logits times
+  fp32(1/T) bit for bit, so the backbone and head outputs are identical. Argmax is equal on 252 of 252.
+- **Card and numbers.** `docs/model-cards/kev-27b-v2.md`. Every number traces to a committed report in `docs/claims.json`:
+  `runs/r23-verdict/`, `runs/r23-readout/round23.json`, `runs/r23-breadth-report/`, the serving reports,
+  `runs/release/kev-27b-r23.json` and the staging record. `runs/release/kev-27b-r23.json` comes from
+  `scripts/release_numbers.py --release kev-27b-r23`; release specs may now give an arm a registered `pool` instead of a
+  trial. The four recorded releases reproduce byte for byte from the research checkout's rows.
+- **Long contracts.** The report-only longdoc-v1 test read landed while this was staged, and the card carries it
+  (`runs/r23-verdict/27b-tests.json`, `longtest`). CUAD test: 0.874 against Kev-27B's 0.890, −1.6 [−3.0, −0.3]. ECE is
+  0.053 against 0.007, and 2 to 4 times Kev-27B's in every length bucket. Round 24's unblended SFT was −1.8 with ECE
+  0.055, so the blend recovered almost none of it. The generated bundles are at 1.000.
+- **Caveats the card states.** Round 23 was designed after round 24's confirmation and confirmed on the same test and
+  locked partitions. Short states are not better than Kev-27B's (locked −0.8 [−2.0, +0.5]; transfer-r3 test with
+  `emotion` −2.1 [−3.5, −0.8]). Long contracts are worse and overconfident (above). There is no scienthoon read
+  (removed), and the SFT parent was −5.5 there. hard-v1, devtools-v1 and documents-v1 are in distribution.
+- **To release (Jared's call).**
+  1. Tag Kev-27B's current weights on `jaredpalmer/kev-27b` (e.g. `b1v2-release`).
+  2. Publish `/runs/release/kev-27b-r23/checkpoint` there from a container, with the card moved to `kev-27b.md`.
+  3. Then README, the Space, the collection and kev-deploy's GPU list.
+- **Spend.** Modal metered $3,971.71 before this work and $3,977.37 after the copy, upload and verification
+  (workspace-wide, other apps included). App `kev-release`: CPU copy and upload, plus one H200 read of about 10 minutes.
+
 ## Round 25 (registered)
 
 ### Round 25 - continued full-weight SFT from Kev-27B: breadth with replay, no long-document families (registered with this spec's commit, written before any round-25 training or read)
@@ -2228,6 +2412,305 @@ While the study runs, at most two batches run alongside it.
 3. Read the metered cost, then run `uv run python -m kev.rounds launch experiments/rounds/r26.json`, then `watch`.
 4. Read-out, then confirmation as written.
 
+### Round 26 result
+
+**No candidate (0 of 4).** Every candidate fails `3_breadth_ece_at_most_parent_plus_0.01`: breadth-v1 ECE is 0.0197 to
+0.0287 against a bar of 0.0176 (Kev-27B 0.0076). The final, `27b-lr1e6`, passes the other 11 criteria, as round 25's final
+did (breadth ECE 0.0233 here, 0.0235 there). The three snapshots also fail the breadth primary: their lower bounds are
+−0.12, −0.16 and −0.04 pp. `27b-lr1e6-s50` also fails the short-state accuracy guard (lower bound −2.52 pp), and
+`27b-lr1e6-s25` fails tasksource-heldout ECE (0.0627 against 0.0523). Nothing goes to confirmation, so no test partition or
+locked set was read for round 26, and nothing is released. Read-out: `runs/r26-readout/round26.json`
+(`python -m kev.rounds readout experiments/rounds/r26.json`, written by the watcher at 12:53Z once the last read landed and
+re-run at 12:57Z); table `runs/r26-readout/readout.txt`; markdown `runs/r26-readout/tables.md`.
+
+How it is served: every candidate at its pooled T (648 questions, none excluded as a transfer-v4 duplicate), Kev-27B at
+1.382. Deltas are paired record-clustered bootstraps against Kev-27B (2,000 resamples, seed 0, micro). Accuracy and
+confident errors are in pp, Brier is absolute, and ECE is shown as served against its bar. The exclusions removed the same
+questions as in rounds 23-25, on both sides: 600 breadth, 795 tasksource-heldout, 380 Kev-panel and 220 short-state.
+
+**Training** (one attempt, app `kev-r26`, 8 × H200; `runs/r26-27b-lr1e6/00-trial-0`):
+- **Setup:** the warm start loaded 850 full tensors plus the pointer head from `/runs/r25-init/kev-27b-merged/checkpoint`
+  (`train.log`: "delta: warm start from ..."; 58,515 training requests). The plan matched the projection exactly: 915
+  micro-batches per rank, 458 steps, largest pass 25,590 of 40,960 padded tokens, snapshots after steps 115 / 229 / 344.
+  So the snapshot paths in `r26.json` were right and nothing was corrected. There were 8,263 none pairs (8,256 projected).
+- **Speed and memory:** training took 5,836 s (1.62 h, 12.7 s per step) against the projected 1.77 h anchored (2.51 h
+  unanchored). The whole trial took 8,843 s, inside one 4-hour attempt. Peak memory was 80.4 GB per GPU. The snapshots
+  blocked training for 19.8, 19.9 and 29.2 s.
+- **Loss and gradients:** training loss went from 0.41 at step 10 to 0.27-0.31 over the last steps. Mean gradient norm was
+  12.2 (max 61.2), and all 458 steps were clipped.
+- **In-trial screening** (sft-v2-r26 development, in distribution; not read by the rule): 0.893, in-trial T 0.966.
+  transfer-v4 development 0.855 raw (round 25's lr 1e-6 trial: 0.840).
+
+| criterion | lr1e6-s25 | lr1e6-s50 | lr1e6-s75 | lr1e6 |
+|---|---|---|---|---|
+| T (pool, 648) [90 % CI] | 1.350 [1.203, 1.447] | 1.350 [1.203, 1.447] | 1.203 [1.097, 1.320] | 1.320 [1.176, 1.414] |
+| 1 breadth acc, lower > 0 (2475) | +0.5 [−0.1, +1.2] **fail** | +0.6 [−0.2, +1.2] **fail** | +0.6 [−0.04, +1.3] **fail** | +1.0 [+0.3, +1.7] |
+| 1 tasksource-heldout acc, lower > 0 (1993) | +2.4 [+1.1, +3.7] | +2.7 [+1.2, +4.2] | +3.5 [+2.0, +4.9] | +3.3 [+1.8, +4.8] |
+| 1 Kev panel acc, lower ≥ −1 (3351) | +3.7 [+2.7, +4.7] | +5.0 [+3.9, +6.1] | +5.6 [+4.6, +6.7] | +5.6 [+4.5, +6.6] |
+| 2 short acc, lower ≥ −2 (1586) | −0.57 [−1.26, +0.13] | −1.45 [−2.52, −0.44] **fail** | −0.63 [−1.58, +0.32] | −1.01 [−1.95, −0.06] |
+| 2 short Brier, upper ≤ +0.02 | +0.005 [−0.001, +0.011] | +0.008 [−0.003, +0.018] | +0.000 [−0.011, +0.009] | +0.003 [−0.008, +0.011] |
+| 2 short confident errors, upper ≤ +1 | −0.3 [−1.0, +0.4] | −0.2 [−1.0, +0.5] | −0.3 [−1.1, +0.4] | −0.2 [−0.9, +0.5] |
+| 2 CUAD acc, lower ≥ −2 (2254) | +0.8 [+0.2, +1.5] | +0.1 [−0.5, +0.9] | +0.2 [−0.6, +1.0] | +0.2 [−0.6, +1.0] |
+| 2 CUAD 16k+ acc, cand − parent ≥ −2 | 0.843 vs 0.837 | 0.834 vs 0.837 | 0.836 vs 0.837 | 0.834 vs 0.837 |
+| 2 unknowable share ≤ 0.05 | 0.000 | 0.000 | 0.000 | 0.000 |
+| 3 breadth ECE ≤ 0.0176 (Kev-27B 0.0076) | 0.0209 **fail** | 0.0197 **fail** | 0.0287 **fail** | 0.0233 **fail** |
+| 3 Kev-panel ECE ≤ 0.0327 (Kev-27B 0.0227) | 0.0180 | 0.0190 | 0.0170 | 0.0197 |
+| 3 tasksource-heldout ECE ≤ 0.0523 (Kev-27B 0.0423) | 0.0627 **fail** | 0.0416 | 0.0394 | 0.0419 |
+| rank score (Δ breadth + Δ tsheld + Δ Kev, pp) | +6.6 | +8.2 | +9.7 | +9.8 |
+| criteria passed | 9/12 | 9/12 | 10/12 | 11/12 |
+| verdict | fail | fail | fail | fail |
+
+Exact lower bounds of the breadth primary: s25 −0.0012, s50 −0.0016, s75 −0.0004, final +0.0028. The final's short-state
+lower bound is −0.0195, 0.05 pp inside its guard.
+
+**Report-only panels** against Kev-27B (the full table, with every OOD and external panel, is `runs/r26-readout/tables.md`):
+
+| panel | lr1e6-s25 | lr1e6-s50 | lr1e6-s75 | lr1e6 |
+|---|---|---|---|---|
+| breadth, all 14 sources, acc (3075) | +0.6 [−0.1, +1.3] | +0.5 [−0.2, +1.2] | +0.6 [−0.1, +1.3] | +0.8 [+0.1, +1.6] |
+| tasksource-heldout all 24 families, acc (2788) | +2.3 [+1.1, +3.4] | +2.9 [+1.7, +4.2] | +3.6 [+2.4, +4.8] | +3.4 [+2.2, +4.7] |
+| hard-v1 acc (1083) | +9.3 [+6.8, +12.0] | +11.2 [+8.6, +13.8] | +12.7 [+10.1, +15.4] | +12.7 [+10.0, +15.3] |
+| Kev panel without hard-v1, acc (2268) | +1.0 [+0.2, +1.9] | +2.1 [+1.1, +3.1] | +2.2 [+1.3, +3.2] | +2.2 [+1.1, +3.2] |
+| SemIf / WANLI-v2 / TypeSafe acc | +0.0 / +0.4 / +1.1 | −0.7 / +0.4 / +0.0 | +0.7 / +0.3 / +0.0 | +0.7 / +0.1 / +0.0 |
+| ood-v2 / agents-ood / guardrails-ood acc | +0.2 / −0.2 / +3.5 | +0.3 / +0.0 / +3.7 | +0.6 / +0.3 / +4.1 | +0.5 / +0.5 / +4.1 |
+| ood-v2 / agents-ood / guardrails-ood ECE Δ | −0.024 / −0.071 / −0.056 | −0.022 / −0.072 / −0.058 | −0.029 / −0.092 / −0.066 | −0.029 / −0.088 / −0.065 |
+| CUAD ECE (Kev-27B 0.063) | 0.078 | 0.086 | 0.099 | 0.096 |
+| CUAD ECE 16k+ (Kev-27B 0.071) | 0.077 | 0.090 | 0.102 | 0.104 |
+| short-state acc, candidate (Kev-27B 0.9042) | 0.8985 | 0.8897 | 0.8979 | 0.8941 |
+
+CUAD by length (accuracy / ECE; Kev-27B first): < 8k (896) 0.845 / 0.059, candidates 0.848-0.853 / 0.083-0.096; 8k-16k
+(452) 0.834 / 0.063, 0.832-0.847 / 0.081-0.106; 16k-32k (454) 0.841 / 0.070, 0.837-0.848 / 0.082-0.105; 32k-64k (452)
+0.832 / 0.072, 0.830-0.838 / 0.083-0.108 (per arm in `tables.md`). The generated longdoc items stay at 1.000 accuracy.
+
+**Report only: against round 25's lr 1e-6 arm at the same fraction of its run** (s25 / s50 / s75 / final against round 25's
+s25 / s50 / s75 / final; each side at its own pooled T; the rule's panels plus short states split into transfer-v4
+development and transfer-r3 test; `runs/r26-readout/vs-r25.md`, `vs-r25-<arm>.json`, from `r26-vs-ref.py --ref r25`):
+
+| vs round 25 (panel, n) | s25 | s50 | s75 | final |
+|---|---|---|---|---|
+| T: round 26 / round 25 | 1.350 / 1.289 | 1.350 / 1.260 | 1.203 / 1.289 | 1.320 / 1.350 |
+| breadth gated acc (2475) | −0.2 [−0.8, +0.4] | −0.0 [−0.6, +0.5] | −0.3 [−0.9, +0.3] | +0.2 [−0.3, +0.7] |
+| breadth gated ECE Δ | −0.002 [−0.012, +0.010] | −0.004 [−0.013, +0.005] | +0.000 [−0.009, +0.010] | −0.000 [−0.008, +0.008] |
+| tasksource-heldout gated acc (1993) | +1.7 [+0.7, +2.7] | +0.4 [−0.6, +1.5] | +0.6 [−0.5, +1.6] | +0.5 [−0.5, +1.5] |
+| tasksource-heldout all 24 families (2788) | +1.1 [+0.2, +2.0] | +0.8 [−0.2, +1.7] | +0.6 [−0.3, +1.6] | +0.6 [−0.2, +1.6] |
+| Kev panel acc (3351) | +0.7 [+0.0, +1.4] | −0.2 [−0.9, +0.5] | −0.2 [−1.0, +0.5] | −0.7 [−1.4, +0.0] |
+| hard-v1 acc (1083) | +3.0 [+1.2, +4.9] | +1.0 [−0.6, +2.7] | +0.9 [−0.8, +2.6] | +0.2 [−1.4, +1.8] |
+| short acc (1586) | −0.1 [−0.6, +0.4] | −1.1 [−2.1, −0.2] | +0.1 [−0.7, +0.9] | −0.3 [−1.1, +0.5] |
+| transfer-v4 development acc (576) | +0.2 [−0.3, +0.9] | +0.2 [−1.2, +1.7] | +1.2 [+0.2, +2.6] | +1.2 [+0.2, +2.6] |
+| transfer-r3 test acc (1010) | −0.2 [−1.1, +0.5] | −1.9 [−3.2, −0.8] | −0.5 [−1.6, +0.4] | −1.2 [−2.2, −0.3] |
+| short confident errors | −0.5 [−1.0, −0.1] | −0.4 [−0.9, −0.1] | −0.4 [−0.9, +0.0] | −0.4 [−0.9, +0.0] |
+| CUAD acc (2254) | +0.6 [+0.1, +1.1] | −0.2 [−0.5, +0.0] | +0.0 [−0.3, +0.3] | +0.0 [−0.2, +0.3] |
+| CUAD ECE Δ | −0.008 [−0.017, +0.001] | −0.012 [−0.018, −0.005] | −0.002 [−0.008, +0.003] | −0.007 [−0.012, −0.001] |
+
+**What the round showed** (development reads, one round):
+- **Twice the tasksource-v1 records did not raise the breadth gains.** Against round 25's arm at the same fraction, breadth
+  is level at every point (−0.3 to +0.2, every interval spanning 0), and the final's rank score equals round 25's (+9.8).
+  Tasksource-heldout is higher only early (s25 +1.7 [+0.7, +2.7]); by the final the gain is +0.5 [−0.5, +1.5]. Against
+  Kev-27B the breadth primary is +0.5 to +1.0 (round 25's lr 1e-6: +0.6 to +0.9).
+- **Breadth ECE did not move either:** 0.0197-0.0287 against round 25's 0.0227-0.0283 at the same fractions; the paired
+  deltas against round 25 are −0.004 to +0.000, all intervals spanning 0.
+- **The registration's named suspects for short-state drift (replay share 23.5 % instead of 30.2 %, 458 steps instead of
+  356) show a small effect, confined to transfer-r3 test:** the short-state panel reads −0.6 to −1.5 pp against Kev-27B
+  (round 25's lr 1e-6: −0.3 to −0.8), and s50 fails its guard. Against round 25 the loss is on transfer-r3 test (s50
+  −1.9 [−3.2, −0.8], final −1.2 [−2.2, −0.3]), while transfer-v4 development gains (+1.2 [+0.2, +2.6] at s75 and the final)
+  and short-state confident errors fall (−0.4 to −0.5 pp).
+- **CUAD calibration is a little better than round 25's, not fixed:** CUAD ECE 0.078-0.099 (round 25 0.087-0.103, Kev-27B
+  0.063); final −0.007 [−0.012, −0.001] against round 25's final. It still grows with steps (s25 0.078 → final 0.096).
+- **Temperature (report only, `runs/r26-readout/breadth-ece-by-t.json`, `both-bars-by-t.json`):** as in round 25, the
+  gated breadth panel's ECE-minimising T is 1.44-1.56, above every pooled fit, and tasksource-heldout's is 0.92-1.14
+  (`27b-k-w85`: 1.32 and 1.10). Unlike round 25, for s50 and the final some temperatures inside the pooled 90 % interval
+  would meet both ECE bars together (41-point grid: s50 14 points, T 1.368-1.447; final 6 points, T 1.367-1.408; the
+  final's closest point, T 1.372, reads breadth 0.0168 and tasksource-heldout 0.0473). For s25 and s75 none does. The rule
+  serves the pool fit, so this changes no verdict.
+
+**Report only: against round 23's confirmed `27b-k-w85`.** No candidate was named, so every arm is compared.
+- **Method:** each side at its own pooled T (w85 1.320). Paired bootstrap on the development reads, the same panels and
+  exclusions, with `short` split into transfer-v4 development and transfer-r3 test.
+- **Files:** `runs/r26-readout/vs-w85.md` and `vs-w85-<arm>.json`, from `runs/r26-readout/r26-vs-ref.py --ref w85`
+  (the w85 rows are read from the round-23 checkout).
+- **Result: w85 is ahead or level on nearly every panel.**
+  - Against the final: breadth −0.6 [−1.4, +0.2], tasksource-heldout −0.9 [−2.2, +0.4], Kev panel −2.6 [−3.6, −1.7]
+    (hard-v1 −5.3, the rest −1.3), agents-ood −1.6 [−2.2, −1.0].
+  - Short states are level: −0.1 [−1.0, +0.9]; transfer-v4 development +0.0 [−1.6, +1.7], transfer-r3 test −0.1
+    [−1.2, +1.0]. The candidate has more confident errors: short +0.9 [+0.4, +1.5] pp.
+  - CUAD accuracy is level (−0.6 [−1.7, +0.4]), with CUAD ECE −0.001 [−0.014, +0.009]. By length, w85 reads 0.856 / 0.096
+    (< 8k) and 0.839 / 0.102 (16k+), against 0.849 / 0.093 and 0.834 / 0.104. Breadth ECE-by-T for w85: 0.0103 at its
+    pooled T.
+- **Ranking:** no round-26 arm is ahead of w85 with a lower bound above 0 on any panel the rule gates. The report-only
+  exceptions are CUAD ECE at s25 (−0.019 [−0.032, −0.007]) and s50 (−0.012 [−0.024, −0.001]), and ood-v2 ECE at s75
+  (−0.005 [−0.010, −0.001]). Kev-27B and `27b-k-w85` remain Jared's release options ("Round 23 confirmation"); nothing here
+  changes that choice.
+
+**Deviations:**
+- **(i) The final's reads were launched through the registered spend gate, not by the watcher.** The watcher launches a
+  finished trial's reads without a gate. At the trial's end the projected spend (~$160-200) plus two running batches
+  ($802) plus the final's ($401) could have passed $1,373. So the watcher was stopped at 08:02Z, while the trial was
+  still training, and replaced by a local helper (`runs/r26-readout/r26-finish.sh`). The helper polled the trial's call,
+  ready to restart the watcher at once on a timeout. It waited for `27b-lr1e6-s75`'s launch, then for the gate, then
+  restarted the watcher at 10:13Z. The watcher pulled the study, launched the final's reads once and wrote the read-out.
+  The order, s75 at the trial's end and then the final, is the registration's wall-clock plan.
+- **(ii) The gate counted whole batches, as registered** (`runs/r26-readout/r26-gate.py`): $494 while the trial's call
+  ran, and $400.97 for each read batch until every one of its 16 jobs had its `report.json`. It read the metered cost
+  before every launch. Launches (gate ≤ $1,373 over the $4,453.81 launch reading):
+  - s25 at 07:37Z: $917.50;
+  - s50 at 08:00Z: $1,346.60;
+  - s75 at 09:32Z: $1,353.53. It held at 08:26Z, when the snapshot was complete ($1,782.50), and launched once the study's
+    bound was released.
+  - the final at 10:15Z: $1,369.81. It held from 09:36Z ($1,758.52) until s25's batch had landed.
+  The helpers are `runs/r26-readout/r26-autolaunch.sh` and `r26-finish.sh`; copies of the running scripts, which lived
+  in `runs/`.
+- **(iii) A helper bug, no effect.** The snapshot launcher first looked for `snapshot.json` one directory above
+  `checkpoint/`. It was fixed and restarted at 07:36Z, within a minute of the s25 snapshot's commit, and launched s25 at
+  once.
+- **(iv) No read failed.** The private suites' development partitions were in the checkout before the deploy
+  (sha256-checked against their manifests), so all 64 reads ran first time. The last read landed at 12:53Z. The deploy,
+  training and reads ran on app `kev-r26`, and the deployed app was stopped at 12:57Z. `kev-sft` was not touched.
+
+**Spend** (Modal metered, workspace-wide):
+- $4,453.81 at the launch reading (07:03Z), against ≈ $4,454 at registration.
+- Readings before launches: $4,464.25 (07:16Z), $4,476.34 (07:36Z), $4,504.47 (08:00Z), $4,539.40 (08:26Z),
+  $4,604.43 (09:32Z), $4,620.71 (10:13Z), $4,650.37 (11:17Z).
+- $4,558.69 at 12:56Z and 13:01Z after the last read. That is below the 11:17Z reading, so the meter was revised down.
+- Total: **+$104.88** over the launch reading on the latest reading (+$196.56 on the 11:17Z one), for one one-attempt
+  study (~$100 at list) and 64 reads. Metering lag is still to come. The projection was ≈ $4,680-4,710. The night's
+  ceiling was ≈ $5,980, with a hard stop at $5,700.
+
+**Evidence** (committed):
+- The read-out, its tables and the report-only extras (`vs-r25*`, `vs-w85*`, `breadth-ece-by-t.json`,
+  `both-bars-by-t.json`), with the scripts that wrote them and the gate / launch helpers under `runs/r26-readout/`.
+- The launch records `runs/r26-reads-*.json`.
+- Every public-suite read's report and rows (`runs/r26-27b-<arm>-<tag>`); for the OOD reads, reports only.
+- For the trial: `provenance.json`, `result-public.json` (without the per-task table), in-trial transfer rows and
+  temperature, `training_metrics.json`, and the three `snapshot.json` records.
+
+Private (`jaredpalmer/kev-private-train` @ `2f2c44d3` under `runs/r26/`, with sha256s in `runs/r26-readout/private-rows.json`;
+restore with `scripts/private_rows.py restore`):
+- the four tasksource-heldout-v1 reads (rows and reports);
+- the ood / agents-ood / guardrails-ood rows;
+- the trial's development rows and full `result.json`.
+
+Checkpoints (~51 GB each: 3 snapshots + the final) stay on the `kev-runs` volume.
+
+**Next** (proposals, not registered; each needs its own spec):
+- **More breadth data at lr 1e-6 is not the lever.** Two rounds of the same recipe with 13,000 and 26,000 tasksource-v1
+  records read the same breadth accuracy and the same breadth ECE. The gap to w85 on the Kev panel (hard-v1 −5.3) and
+  on breadth (−0.6) is also unchanged.
+- **The breadth-ECE failure now sits inside the temperature's sampling noise for the final.** Temperatures in its pooled
+  90 % interval meet both ECE bars. A round that asks whether a larger or different held-out pool (more held-out public
+  sources beside transfer-r3's eight and MMLU-Pro) fits a T that serves breadth and tasksource-heldout together would test
+  that directly, without training. The pool change would have to be registered before any read under it.
+- **Short-state drift tracks the replay share.** Transfer-r3 test fell against round 25 when replay went from 30.2 % to
+  23.5 %. Any further continued-SFT round from Kev-27B should hold the replay share, not the replay count.
+
+## Round 27 (registered)
+
+**Question.** Is round 18's 9B documents-and-skills delta a Kev-9B candidate under the audited rule? Round 18 (2026-09-24)
+selected no 9B candidate: arm (a) passed both primaries (skills +19.0, documents +7.0) and failed only WANLI-v2, scienthoon
+and the pooled externals, all since removed or ungated (scienthoon removed, the audit, "WANLI and TypeSafe removed").
+Round 18's verdict stands; this is a new, registered selection over its two finished trials, with no training.
+
+**Arms** (checkpoints on the volume; their development reads from round 18, unchanged): `9b-r18a` =
+`runs/r18-9b/00-trial-0` (lr 2e-5), `9b-r18b` = `runs/r18-9b/01-trial-1` (lr 1e-5); parent the released Kev-9B
+(`jaredpalmer/kev-9b@2629c06a`, `night2-9b-du/00-trial-0`, its round-18 reads).
+
+**Rule** (round 18's, with the 2026-09-27 audit's verdicts applied as in round 24): primaries hard-v1 + devtools-v1
+development pooled accuracy lower > 0 and documents-v1 development lower > 0; guards: short state (transfer-v4 dev +
+transfer-r3 test, without `emotion`) accuracy lower ≥ −2 pp, Brier upper ≤ +0.02, confident errors upper ≤ +1 pp;
+unknowable share ≤ 0.05 (transfer-v9); hard-v1 ECE ≤ the parent's + 0.01. devtools-v1 drops `flakeflagger` and the
+`commitpackft_type` task in every panel (the audit's Kev-panel exclusions). No WANLI, TypeSafe, scienthoon or pooled
+external read; SemIf is reported (optional). Candidate: the passing arm with the larger sum of the two primary estimates.
+
+**Temperature.** Every arm is served at one temperature fitted on round 24's held-out pool (transfer-r3 calibration's
+eight sources + transfer-v9's `mmlu_pro`, 90 % bootstrap interval; standing rule: never an in-distribution partition),
+not the in-distribution T each trial's head carries. `trained_on` lists decision-v7, documents-v1 and round10/skills
+(round15/joint is their concatenation); it leaves out `evals/night2` (the released Kev-9B's delta), whose manifest lists
+no sources, so the engine cannot check it: its records are four synthetic families (`night2_dates`, `night2_assertion`,
+`night2_unknowable`, `night2_unknowable_control`), none in the pool. The parent keeps its shipped T 2.30.
+
+**Confirmation** (round 18's, with the same exclusions): hard-v1 + devtools-v1 test pooled lower > 0 and documents-v1 test
+lower > 0 (documents-v2 reported); locked transfer-v4 accuracy ≥ parent − 1 pp and served Brier ≤ parent + 0.005.
+
+**Not blind.** The development reads were made on 2026-09-24 and their headline numbers are in "Round 18 result"; the
+WANLI analysis that removed WANLI-v2 compared arm (a) with the parent. Selecting between two finished arms on reads already
+seen is optimistic; the untouched test partitions and the locked read are the guard. Publishing a new Kev-9B still needs
+Jared's explicit OK.
+
+## Round 27 result (2026-09-30) — Kev-9B v2 confirmed
+
+Both arms pass every criterion (`runs/r27-readout/round27.json`); the candidate is `9b-r18a` (lr 2e-5, the larger
+primary sum). Served at the pool temperature (arm (a) T 2.194 [2.047, 2.406], arm (b) 2.000, 648 questions); against the
+released Kev-9B at its shipped 2.30:
+
+| arm | primary (hard + devtools dev) | hard-v1 dev | devtools-v1 dev | documents-v1 dev | short acc | short Brier | hard ECE |
+|---|---|---|---|---|---|---|---|
+| 9b-r18a | **+19.3 [+17.2, +21.6]** | +23.8 | +13.0 | **+7.0 [+4.8, +9.2]** | +0.1 [−1.1, +1.2] | −0.000 [−0.009, +0.009] | −0.023 |
+| 9b-r18b | +16.5 [+14.4, +18.7] | +19.0 | +13.0 | +6.4 [+4.3, +8.6] | −0.4 [−1.5, +0.8] | +0.003 [−0.006, +0.011] | −0.014 |
+
+**Confirmation of 9b-r18a** (`runs/r27-verdict/9b-{tests,locked}.json`, each read once): tests PASS — hard-v1 + devtools-v1
+test pooled +18.7 [+16.7, +20.8] (hard-v1 +25.0, devtools-v1 +9.9 with the audit's exclusions), documents-v1 test +7.1
+[+4.7, +9.2], documents-v2 (reported) +8.0 [+5.9, +10.2]; locked PASS — transfer-v4 test accuracy +0.0 [−1.7, +1.8]
+(0.852 both, bar −1 pp), served Brier −0.025 [−0.047, −0.007] (0.199 vs 0.224). The parent's test reads are the 2026-09-30
+family reads of `jaredpalmer/kev-9b@2629c06a` (`runs/r27c-9b-parent-*`). Infrastructure: the spec's `app` is `kev-r27`
+(the registered `kev` named no deployed app, and the first locked launch failed before reading anything).
+
+## Released: Kev-9B v2 (2026-09-30)
+
+- Hub: v1 (`2629c06a`) tagged `v1` first; v2 uploaded from `/runs/release/kev-9b-r27/checkpoint` by
+  `modal_app.py::release_publish --public --confirm-public jaredpalmer/kev-9b --replace` in one commit (`b5d8c18e`): adapter
+  sha256 `2b2a70cf…`, `head.pt` `8e1dab2c…` (T 2.1936); the card is `docs/model-cards/kev-9b.md`. `--replace` dropped v1's
+  `train.log`, which stays at the tag.
+- The staged copy: `modal_app.py::release_copy` from `/runs/r18-9b/00-trial-0/checkpoint` (adapter hash equal); `head.pt` T
+  set to the round's pool fit by `scripts/calibrate_checkpoint.py --temperature ... --reason ...` (it cannot list round15/joint's
+  sources to refit; `kev.rounds validate` had checked the pool against the arm's `trained_on`).
+- Verification (`modal_app.py::release_verify`, fresh HF cache, no token; `runs/rel9-public/`, `scripts/compare_release_rows.py`):
+  semif-v1 252 of 252 rows and transfer-v4 development 764 of 764 with argmax equal to round 18's raw reads at T 2.19
+  (max |Δp| 0.0014 and 0.0015; not bit-exact against reads made in-trial on another GPU); `@v1` loads v1 at T 2.30 and
+  reproduces its served semif-v1 read (max |Δp| 0.0008, 0 flips).
+- Numbers: `experiments/releases/kev-9b-r27.json` → `runs/release/kev-9b-r27.json`; README Models row, calibration and
+  limits text, figures (`scripts/plot_family.py`, `scripts/plot_tweet.py`), AGENTS.md, claims (901 verified). GitHub release
+  `kev-family`: `kev-9b.tar.gz` rebuilt from the Hub commit (+ `locked_test.json`), `SHA256SUMS.txt` regenerated.
+- The kev-deploy / kev-finetune `KEV_REF` pins are unchanged: v2 is an adapter of the same shape, served by the same code.
+
+## Released: Kev 1.0 (2026-10-01)
+
+Jared approved the release of PR #206's package. Nothing was trained or re-read; the steps are `docs/releases/kev-1.0.md`'s
+maintainer plan, and the record is `runs/release/kev-1.0.json`.
+
+- **Hub.** Each 1.0 card was uploaded as `README.md` in a card-only commit (`parent_commit` = main before), then the
+  annotated tag `v1.0` was put on that commit, so `@v1.0` shows the 1.0 card (plan step 4's alternative). Before each upload,
+  main had the release weights: 0.8B, 4B and 9B main were the weights revisions, and 27B main (`ef78cc8a`) differed from
+  `28be62e9` only in `README.md`. After each upload, every other file has the same blob and LFS sha256, `README.md` matches
+  the repo card byte for byte, and `card_data` parses with the card's `base_model` / `base_model_relation`.
+
+  | repo | weights | `v1.0` (card commit) | adapter / head |
+  |---|---|---|---|
+  | `kev-0.8b` | `9a45d25e` | `bf75a6a8` | `9b908623…` / `f400bd12…` |
+  | `kev-4b` | `139fdd94` | `6cfce5c2` | `90e81735…` / `dd633435…` |
+  | `kev-9b` | `b5d8c18e` | `db029f08` | `2b2a70cf…` / `8e1dab2c…` |
+  | `kev-27b` | `28be62e9` | `af0e6d55` | 11 shards unchanged / `7968f17b…` |
+- **GitHub.** The release `kev-1.0` (tag on PR #206's merge, `6b719c3`) is published and marked Latest. Its body is
+  `docs/releases/kev-1.0.md` above the maintainer plan, which now includes an Assets section. Assets come from
+  `scripts/build_release_assets.py`, and a second build gave the same `SHA256SUMS.txt`: `kev-0.8b.tar.gz` `0ae144c7…`,
+  `kev-4b.tar.gz` `2e707e2e…`, `kev-9b.tar.gz` `acd13320…`, `SHA256SUMS.txt` `495d104f…`
+  (`runs/release/kev-1.0-{SHA256SUMS.txt,manifest.json}`). Kev-27B is linked as `jaredpalmer/kev-27b@v1.0`. These are the
+  replacement assets. The first upload (`943891a2…`, `6f87da10…`, `90518850…`, sums `bc5c520e…`) zeroed every file's mtime,
+  so `kev.serve` reported an unpacked checkpoint's release date as 1969-12-31. PR #209 made the builder stamp
+  2026-10-01 00:00 UTC (`SOURCE_DATE_EPOCH`) and made `Checkpoint.release_date` read UTC and skip pre-2000 mtimes. The
+  tarballs were rebuilt and replaced the same day. Their members are byte-identical; only the mtimes differ
+  (`runs/release/kev-1.0.json` `github.replaced_assets`).
+- **kev-family** (plan step 7) is retired but not deleted. Its three tarballs and `SHA256SUMS.txt` were removed after checking
+  that the adapters and heads inside were byte-identical to 1.0's. It is renamed "Kev family (superseded by Kev 1.0)", its
+  body is a pointer to `kev-1.0` that lists the removed assets' hashes, and its tag is kept. Its old notes are in
+  `runs/release/kev-family-notes-retired.md`.
+- **Verification.** Each `jaredpalmer/kev-<size>@v1.0` was resolved through `kev.checkpoint` with no token and a fresh
+  cache. It resolves to its card commit, the adapter, head and 27B shard hashes match, and the temperatures are 2.35 / 2.41 / 2.19 / 1.32.
+  On a 2-record smoke benchmark (`evals/smoke-v1` development, MPS, fp32), 0.8B and 4B from the tag scored 2 of 2, and
+  `kev-0.8b.tar.gz` from the release gave logits identical to the tag's (`runs/release/kev-1.0-verify/`). The extracted tarball
+  served a System One request. The assets were downloaded again anonymously and `shasum -c` passed. The collection lists all
+  four repos. The Space is RUNNING and `/decide` answers on Kev-4B and Kev-0.8B. It was not republished: its vendored
+  `kev/checkpoint.py` lacks only #200's MLX full-weight path, which the Space does not use.
+- `KEV_REF` pins (71d4829) are unchanged: the 1.0 checkpoints need no newer code.
+
 ## Next
 
 Goals and open questions, not registered rounds; each becomes a spec and a PLAN section before it runs.
@@ -2281,12 +2764,358 @@ Goals and open questions, not registered rounds; each becomes a spec and a PLAN 
 2. **A 9B remedy other than replay** (finding 4): a KL term toward the released Kev-9B's own served answers on the replayed
    records (`kev.anchors` today targets the frozen base's zero-shot answers; this needs the released model's distributions as
    the target), or broader replay.
-3. **Publish the documents-v1 and hard-v1 train partitions** (23 MB each, not in git, not yet in `kev-suites`): hard-v1 is
-   programmatic and regenerates byte for byte; documents-v1 train is public-domain CFPB text with teacher-agreed labels.
-   Decide, upload, bump `SUITES_REVISION`, so Kev-4B's and Kev-0.8B's training data is fetchable.
+3. ~~**Publish the documents-v1 and hard-v1 train partitions**~~ Done 2026-09-30: both train partitions (23 MB each, not
+   in git) are in `jaredpalmer/kev-suites` at `cc4bac803e73112689ec327ffa481c519cbc7a05`, now `SUITES_REVISION`, and
+   `load_split` fetches and hash-checks them (hard-v1 `a08ca9c5…`, regenerated byte for byte by `scripts/build_hard_v1.py`
+   before upload; documents-v1 `2d7e4c43…`, public-domain CFPB text with teacher-agreed labels). devtools-v1's train
+   partition (8.9 MB) was already in git. Still not in the public mirror: the round-4/5 delta files (`evals/round4/*`,
+   `evals/round5/*`, regenerated by their builders) and `evals/round6/b1v2/train.jsonl` (in the private kev-private-train).
 4. **Decision Index submission** for Kev-27B and the current Kev-4B / Kev-0.8B.
 5. Smaller open items: rotation-averaged Choice met its round-4.4 gate (permutation flips 0.028 → 0.000 at 9B) and waits for
    a product decision (it multiplies latency); date arithmetic stays the weakest family at every size (finding 9).
+
+## Round 28 (registered)
+
+### Round 28 - the small family's shipped temperatures refitted on held-out datasets, and a validated context length per size (post hoc, no training; registered with this spec's commit, before any round-28 read)
+
+**Why.** Kev-4B (round 10, `r10-skills/00-trial-0`, Hub `139fdd94`, T 2.41) and Kev-0.8B (round 15, `r15-08b/00-trial-0`,
+Hub `9a45d25e`, T 2.35) ship temperatures fitted on their trials' decision-v7 development rows. Those rows are held-out *items*
+of a training corpus: round 19's failure mode, which `docs/autoresearch.md` §3.4 now forbids for any shipped temperature
+(finding 5). `kev.rounds.temperature` on those rows reproduces what ships (4B 2.406, 0.8B 2.351). Kev-27B v2 (T 1.32) and
+Kev-9B v2 (T 2.19, round 27's `9b-r18a`, `jaredpalmer/kev-9b` main since 2026-09-30, Hub `b5d8c18e`, PR #195) already ship the
+held-out pool's fit, so Kev-9B is not an arm here. Its pool T is its shipped T, and its context length is measured on round
+29's read of the same checkpoint. Argmax does not depend on T, so this round is about calibration only. Accuracy is identical
+on every panel by construction, and it is reported anyway.
+
+**Arms** (`experiments/rounds/r28.json`). `4b-r10` and `08b-r15` are the released checkpoints, each served at the temperature
+fitted on the pool below. Each arm's parent is the same checkpoint at its shipped T. The engine serves a parent at its trial's
+development-rows fit, which here is the shipped T. Both sides read the same rows, so every delta is a paired comparison of one
+checkpoint's logits at two temperatures.
+
+**Temperature pool** (rounds 20-27's, unchanged): the eight held-out sources of transfer-r3's calibration partition plus
+transfer-v9's `mmlu_pro`, minus the transfer-v4 development records, with a 90 % bootstrap interval (`temperature.ci`).
+`trained_on` lists what each checkpoint trained on:
+- Kev-4B: the night-2 4B, then round 8's documents-v1 delta (2,000 decision-v7 replay), then round 10's hard-v1 + devtools-v1
+  delta (`evals/round10/skills`, 4,000 replay).
+- Kev-0.8B: the night-2 0.8B, then round 15's joint documents + skills delta (6,000 replay).
+- Both arms name `evals/v7/decision-v7`, `evals/documents-v1`, `evals/round10/skills`, `evals/hard-v1` and `evals/devtools-v1`.
+  `evals/round15/joint` is the concatenation of those, and its manifest lists no sources.
+- `evals/night2` is left out, as in round 27. Its manifest lists no sources, so `validate` would refuse it as unlistable
+  training. Its records are four synthetic families (`night2_dates`, `night2_assertion`, `night2_unknowable`,
+  `night2_unknowable_control`), and none of them is in the pool.
+
+`kev.rounds validate` finds **no pool conflict**: 24 training sources per arm, none of them pooled. As a sanity check, adding
+`evals/round3/transfer-r3` to an arm's `trained_on` makes it refuse the round.
+
+**Rule** (pool-T side minus shipped-T side, paired record-clustered bootstrap, 2,000 resamples, seed 0, micro; `drop_ids` as
+in rounds 24 and 27):
+1. Primary: the pool T must be strictly better calibrated on **breadth-v1 dev + tasksource-heldout-v1 dev pooled**, with the
+   audited exclusions (breadth without `routerbench`, `cfcolor`, `humicroedit`, `chessbench`; tasksource-heldout without the
+   seven families of round 24's private list, `runs/r24-private/tsheld-exclude.json`, sha256 `a72030ab…`). Two conditions:
+   the Brier delta's upper bound < 0, **and** ECE (pool) < ECE (shipped).
+   - Why Brier carries the interval: `kev.rounds` bootstraps both metrics. Brier is a proper score and additive per question,
+     so its record-clustered bootstrap is the exact statistic, and it is also what the locked stage reads.
+   - ECE is binned (10 bins) and not additive, so its resampled differences carry binning noise (the audit measured an ECE
+     sampling sd of 0.006-0.010 per panel).
+   - The ECE point condition stops a temperature that sharpens toward a better Brier but worse reliability from passing.
+2. Guards: ECE (pool) ≤ ECE (shipped) + 0.005 on each of:
+   - breadth-v1 dev (audited);
+   - tasksource-heldout-v1 dev (audited);
+   - transfer-v4 dev, the in-trial read, without `emotion`;
+   - hard-v1 dev;
+   - devtools-v1 dev, without `flakeflagger` and `commitpackft_type`;
+   - documents-v1 dev.
+3. Candidate: an arm that passes. There is one arm per size, so the arm is the size's candidate.
+
+Report only (optional panels, never gating): accuracy (identical) and Brier on every panel; the unknowable share on transfer-v9;
+breadth over all 14 sources; tasksource-heldout over all 24 families; ood-v2, agents-ood-v1 and guardrails-ood-v1 accuracy and
+ECE; longdoc-v1 dev accuracy and ECE per length bucket at both temperatures. The by-length panels use edges 4,096 / 8,192 / 16,384
+/ 32,768 (buckets `under_4k` … `32k_plus` = longdoc's nominal 4k / 8k / 16k / 32k / 64k). The small family's tokenizer counts
+longdoc's states exactly as the suite's Qwen3.8-27B tokenizer does (ratio 1.0000 on 150 records). CUAD ECE is report only because
+its labels are unreliable for calibration (the audit).
+
+**Validated context length** (report only, registered here, gates nothing). The rule is computed by
+`scripts/longdoc_report.py --context-margin -0.03` (`validated_context`, unit-tested) from each size's longdoc-v1
+development read: Kev-4B and Kev-0.8B from this round, Kev-9B v2 from round 29's `9b-r18a` read of the same checkpoint (or,
+if round 29 replaces v2, from that checkpoint's read).
+- Statistic: for bucket b ∈ {16k, 32k, 64k}, the CUAD accuracy difference from the **8k bucket** (states of 6,553-7,618
+  tokens: the 4-8k bucket the small family was trained at, `max_state` 7,552). It is paired on the same (target contract,
+  repeat, question), about 445 questions per bucket, with a 95 % target-clustered bootstrap (2,000 resamples, seed 0).
+  This is the `cuad_paired_vs_8k` statistic longdoc-v1 was built for (#150).
+- b is within tolerance when its interval's **lower bound ≥ −3 pp** and every record of b and of 8k was answered.
+- Validated context length = the nominal size of the largest bucket such that it and every bucket between it and 8k are within
+  tolerance (16,384 / 32,768 / 65,536; 65,536 is the serving cap). If 16k fails, it is 8,192: the trained length, not extended.
+  An unread or partly read bucket is not within tolerance.
+- The generated half, the unpaired differences from the 4k control, the ECE per bucket and the served accuracy per bucket are
+  reported next to it.
+- Sizing. On Kev-27B's own read the paired intervals are 1.5-1.7 pp wide on each side (validated to 65,536 by this rule), so
+  a model with no drop fails a bucket about 5 % of the time. The small models agree less with themselves across lengths, so
+  their intervals will be wider. The rule then errs toward 8,192: it under-claims and never over-claims. An unpaired
+  comparison with the 4-8k buckets pooled would have needed a margin of about 7 pp for the same error rate.
+
+**Blocker: the long reads run out of memory at these sizes.** The 2026-09-30 family longdoc-v1 *test* reads failed with
+`OutOfMemoryError` (`/bench/fam-*-longdoctest/failure.json` on the volume):
+- Kev-4B, Kev-9B v1 and Kev-9B v2 at the first 32k record (720 of 1,200 records scored);
+- Kev-0.8B at the first 64k record (960 scored), on an H100 and again on an H200.
+
+Kev-27B's reads of the same suite completed, but they ran a bf16 backbone. The same wall should stop agents-ood-v1 (47 of 373
+development states over 26k tokens, max 51,148) and guardrails-ood-v1 (12 of 1,263, max 39,072).
+
+A plausible cause, not verified: these reads run in fp32 at a head size of 256. That rules out SDPA's flash kernel and maybe
+the memory-efficient one too, which leaves the math kernel. Its fp32 L × L scores take about 58 GB for the 4B and 9B at the
+32k bucket (16 heads × 30k² × 4 B) and about 115 GB for the 0.8B at 64k (8 heads). That fits where each size failed. Whatever
+the fix is, it is an evaluator change: its own PR, `kev-verify`, before these reads.
+
+Until then the longdoc, agents-ood and guardrails-ood reads are phase B (below) and stay unlaunched. Round 28's verdict does not
+need them (its long and OOD panels are report only). Without phase B, no size has a validated context length.
+
+**Confirmation** (per size whose arm passes, once; computed from rows that already exist, with no new read):
+- `tests`: breadth-v1 test (without the four sources) ECE (pool) < ECE (shipped), Brier and the 14-source panel reported. The
+  rows are the 2026-09-30 family reads `runs/fam-4b-breadthtest` and `runs/fam-08b-breadthtest` (the Hub checkpoints, raw
+  logits).
+- `locked`: transfer-v4 locked served Brier (pool) ≤ Brier (shipped) + 0.005, and accuracy identical (two criteria, ≥ 0 and ≤ 0).
+  The rows are the release locked reads `runs/locked/kev-4b-r10-ungated` and `kev-08b-r15-ungated`.
+- These partitions have been read once for these very checkpoints, and they are not read again. What has not been computed
+  before this registration is their calibration at the pool T, and the pool fixes that T before either set is looked at. No
+  committed record reports these checkpoints' breadth-v1 test ECE.
+- Then `scripts/calibrate_checkpoint.py` in pool mode writes the pool T into a release copy's `head.pt` (`--rows <r3cal
+  rows>:composition_holdout,emotion,legacy_holdout,mmlu,paws,qnli,sciq,tweet_offensive --rows <v9 rows>:mmlu_pro
+  --exclude_rows <transfer rows>`, the same `pool_conflicts` check). Publishing it, and moving the model cards' served numbers,
+  needs Jared's OK.
+
+**Reads this round needs that do not exist yet** (the sweep after merge; H100). Each is one job of `modal_app.py::benchmarks`
+at its suite's timeout. `launch-reads --dry-run` prints them, and phase-B jobs have to be dropped from its batch by hand.
+
+| phase | reads | count |
+|---|---|---|
+| A (now) | `r28-{4b-r10,08b-r15}-{tsheld,r3cal,ood}` | 6 |
+| B (after the memory fix) | `r28-{4b-r10,08b-r15}-{longdoc,agentsood,guardood}` | 6 |
+
+Existing reads it uses: breadth-v1 dev `runs/fam-{4b,08b}-breadth`; hard-v1 / devtools-v1 / documents-v1 / transfer-v9
+`runs/r10-4b-skills-*` and `runs/r15-08b-a-*`; the trials' in-trial transfer-v4 reads; for confirmation `runs/fam-{4b,08b}-breadthtest`
+and the two locked reads. The fam-* rows are on the volume only (`modal volume get kev-runs /bench/fam-4b-breadth runs/`); the
+rest are in the research checkout. The budget is shared with round 29, below.
+
+## Round 28 result (2026-10-01) — no candidate at either size; validated context 8,192 (0.8B, 4B, 9B v2) and 65,536 (27B v2)
+
+**Verdict** (`runs/r28-readout/round28.json`, re-read with every phase-B panel present; unchanged from phase A's read-out in
+PR #203): no candidate. Kev-4B keeps T 2.41 and Kev-0.8B T 2.35.
+- `4b-r10` (pool T 2.297 [2.047, 2.520]) fails both primary conditions: Brier −0.0001 [−0.0005, +0.0003], ECE 0.0252
+  against 0.0240.
+- `08b-r15` (pool T 2.520 [2.194, 2.828]) passes both (ECE 0.0375 against 0.0484, Brier −0.0020 [−0.0025, −0.0014]) and fails
+  the hard-v1, devtools-v1 and documents-v1 ECE guards (+0.011, +0.007, +0.020 against a tolerance of 0.005).
+
+**Report-only phase-B panels** (pool T minus shipped T, ECE; accuracy identical by construction):
+
+| panel | `4b-r10` ECE pool / shipped, Δ [95 % CI] | `08b-r15` ECE pool / shipped, Δ [95 % CI] |
+|---|---|---|
+| longdoc-v1 CUAD (2,254 q) | 0.023 / 0.031, −0.008 [−0.012, +0.004] | 0.061 / 0.053, +0.008 [−0.006, +0.016] |
+| longdoc-v1 generated (2,400 q) | 0.090 / 0.100, −0.010 [−0.011, −0.009] | 0.143 / 0.131, +0.012 [+0.011, +0.012] |
+| agents-ood-v1 (2,084 q) | 0.193 / 0.203, −0.010 [−0.010, −0.010] | 0.103 / 0.097, +0.006 [+0.001, +0.013] |
+| guardrails-ood-v1 (4,949 q) | 0.042 / 0.051, −0.009 [−0.013, −0.004] | 0.051 / 0.063, −0.011 [−0.012, −0.007] |
+
+The pool T would have helped Kev-4B a little on every long and OOD panel and moved Kev-0.8B both ways; neither changes the
+verdict, which the rule fixed on the gating panels. Kev-4B's agents-ood-v1 ECE (0.20) is the worst calibration of any
+panel it was read on.
+
+**Validated context length** (report only; `runs/r28-readout/context.{json,md}`, from `runs/r28-context/report.json`, the
+registered `scripts/longdoc_report.py --context-margin -0.03` command plus Kev-27B v2's round-23 read, and
+`runs/r28-context-served` for ECE at the shipped T). CUAD accuracy difference from the 8k bucket, paired on 445-447
+questions, pp [95 % CI]:
+
+| size | read | 16k | 32k | 64k | validated |
+|---|---|---|---|---|---|
+| Kev-0.8B | `r28-08b-r15-longdoc` | −5.2 [−8.5, −2.1] | −6.0 [−9.5, −2.5] | −7.9 [−11.8, −4.2] | **8,192** |
+| Kev-4B | `r28-4b-r10-longdoc` | −1.1 [−3.4, +1.2] | −5.8 [−9.0, −2.8] | −5.2 [−8.2, −2.0] | **8,192** |
+| Kev-9B v2 | `r29-9b-r18a-longdoc` | −1.4 [−3.7, +0.9] | −3.6 [−6.4, −0.9] | −5.2 [−7.9, −2.5] | **8,192** |
+| Kev-27B v2 | `r23-27b-k-w85-longdoc` | +0.2 [−0.7, +1.2] | −0.2 [−1.2, +0.7] | −1.1 [−2.4, +0.0] | **65,536** |
+
+- Kev-4B and Kev-9B v2 miss the 16k tolerance by 0.4 and 0.7 pp on the lower bound, with point estimates near −1 pp. The
+  registration predicted wider intervals for the small models and a rule that errs toward 8,192, and that is what happened.
+  At 32k all three small models are measurably below 8k (every upper bound < 0), so a longer claim would not have survived
+  a looser margin either.
+- Kev-0.8B already loses 6.8 pp from 4k to 8k (0.779 → 0.711; unpaired, different contracts), inside its trained length.
+- The values are on the Kev 1.0 cards, README and release notes (PR #206, merged).
+
+**Reads** (phase B, H100, `kev-sweepB`): `r28-{4b-r10,08b-r15}-{longdoc,agentsood,guardood}`. `r28-4b-r10-agentsood` was
+lost in wave 1 (its command spawned two jobs, and a detached `modal run` keeps only the last one alive once the local client
+goes; the volume kept a partial `predictions.jsonl`) and was re-read alone at a 10,800 s timeout as
+`/bench/r28-4b-r10-agentsood-t10800` (373/373 records, 61 min), copied to `runs/r28-4b-r10-agentsood`. The wave-1 partial
+stays on the volume. Rows of the agents-ood and guardrails-ood reads are private (held-out records of sft-v2's components);
+their reports are here.
+
+## Round 29 (registered)
+
+### Round 29 - retrospective selection among every 9B delta of rounds 7, 9, 11, 16 and 18 under round 24's audited rule (post hoc, no training; registered with this spec's commit, before any round-29 read)
+
+**What this is, plainly.** This is **post hoc selection among checkpoints that were already trained and already read on
+development data**, the 9B analogue of round 24. The rounds that made them selected no 9B candidate (7, 9, 11, 16, 18); round 27
+later selected and confirmed round 18's arm (a), which is now Kev-9B v2. Those verdicts stand, and nothing here revisits them.
+The rule is round 24's audited rule, fixed in this commit before any computation under it. It is not blind: the documents,
+hard-v1 and devtools-v1 development reads of several arms are in their rounds' read-outs, and round 27's table shows 18a and 18b.
+Picking the best of 11 on development panels is optimistic by construction, and the guard against that is the confirmation,
+on test partitions that no 9B checkpoint in this round except `9b-r18a` has read.
+
+**Parent: the Kev-9B these arms were all trained from, not Kev-9B v2.** Every arm is one epoch from `jaredpalmer/kev-9b` as
+it was before 2026-09-30: `night2-9b-du/00-trial-0`, Hub `2629c06a`, now the `v1` tag, T 2.30, which its development rows
+reproduce (2.297). Kev-9B v2 is `9b-r18a` itself, and it is an arm. Two reasons for this choice:
+- `kev.rounds` serves a parent at its trial's development-rows fit, which for `r18-9b/00-trial-0` is 2.297, not v2's shipped
+  2.19. v2 cannot be a parent served at its shipped T without an engine change.
+- As an arm served at the pool T, `9b-r18a` is v2 exactly as it ships: the pool fit on its reads is 2.1936, the value written
+  into its `head.pt`. So every arm, v2 included, is compared with v1 on the same rows, and the rank puts each arm directly
+  against v2.
+
+The brief asked for "parent = the released Kev-9B at its shipped T". When it was written, the released Kev-9B was v1.
+
+**Arms** (all on the `kev-runs` volume; none missing). Round 12's two 9B skills arms (`r12-skills/00-trial-0`, `01-trial-1`,
+also on the volume) are outside this round's registered scope.
+
+| arm | checkpoint | delta (one epoch from Kev-9B v1) | trained on |
+|---|---|---|---|
+| `9b-r7-s1`, `9b-r7-s2` | `r7-docs/00-trial-0`, `01-trial-1` | documents-v1, replay 2,000, lr 2e-5, seeds 1 / 2 | decision-v7, documents-v1 |
+| `9b-r9-a`, `-b`, `-c` | `r9-docs/0{0,1,2}-trial-*` | documents-v1; (replay, lr) = (6,000, 2e-5), (2,000, 1e-5), (6,000, 1e-5); seed 3 | decision-v7, documents-v1 |
+| `9b-r11-s4`, `9b-r11-s5` | `r11-docs/00-trial-0`, `01-trial-1` | documents-v1, replay 6,000, lr 2e-5, seeds 4 / 5 | decision-v7, documents-v1 |
+| `9b-r16-lr1e5`, `9b-r16-lr2e5` | `r16-9b/00-trial-0`, `01-trial-1` | hard-v1 + devtools-v1 (`round10/skills`), replay 10,000 | decision-v7, round10/skills, hard-v1, devtools-v1 |
+| `9b-r18a` (= Kev-9B v2), `9b-r18b` | `r18-9b/00-trial-0` (lr 2e-5), `01-trial-1` (lr 1e-5) | documents + skills (`round15/joint`), replay 10,000 | decision-v7, documents-v1, round10/skills, hard-v1, devtools-v1 |
+
+`evals/night2` (v1's own delta) is left out of `trained_on` for the reason given in round 28. `validate` finds **no pool
+conflict** for any arm.
+
+**Temperature.** Every arm is served at round 28's pool: transfer-r3 calibration's eight sources plus transfer-v9 `mmlu_pro`,
+minus the arm's transfer-v4 development records, with a 90 % interval. The parent keeps its shipped 2.30.
+
+**Rule** (round 24's, verbatim except where noted; against Kev-9B v1; paired record-clustered bootstraps, 2,000 resamples,
+seed 0, micro; `drop_ids`):
+1. Primaries:
+   - breadth-v1 dev accuracy lower > 0, without `routerbench`, `cfcolor`, `humicroedit`, `chessbench`;
+   - tasksource-heldout-v1 dev accuracy lower > 0, without the seven families (the same private list);
+   - Kev panel accuracy lower ≥ −1 pp: transfer-v4 dev without `emotion`, hard-v1, devtools-v1 without `flakeflagger` and
+     `commitpackft_type`, and documents-v1.
+2. Guards:
+   - short state (transfer-v4 dev + transfer-r3 test, both without `emotion`): accuracy lower ≥ −2 pp, Brier upper ≤ +0.02,
+     confident errors upper ≤ +1 pp;
+   - unknowable share on transfer-v9 ≤ 0.05;
+   - longdoc CUAD: accuracy lower ≥ −2 pp, and CUAD 16k+ accuracy (arm − parent) ≥ −2 pp.
+3. Calibration: breadth, Kev-panel and tasksource-heldout ECE ≤ the parent's + 0.01, with the same exclusions.
+4. Candidate: the passing arm with the largest breadth + tasksource-heldout + Kev-panel accuracy gain.
+
+What round 24 had that this round drops: its WANLI-v2 and TypeSafe panels (both suites were removed on 2026-09-30), and any
+pooled-externals or scienthoon read. SemIf is reported (optional). Also reported: breadth over all 14 sources and over the three
+moved sources, tasksource-heldout over all 24 families, hard-v1 alone, the Kev panel without hard-v1, longdoc generated,
+longdoc by nominal bucket, and ood-v2 / agents-ood-v1 / guardrails-ood-v1.
+
+**What each outcome means** (written before any read):
+- *No arm passes.* There is no candidate. Kev-9B v2's release stands, as round 27 registered it, and the result is recorded
+  (including `9b-r18a`'s own failures, if any, as information).
+- *`9b-r18a` is the candidate.* The audited rule agrees with round 27, and Kev-9B v2 stands. There is **no new confirmation**:
+  its hard-v1, devtools-v1, documents-v1, documents-v2 and locked test reads were round 27's confirmation, and its breadth-v1 test
+  was read in the 2026-09-30 family reads, so none of them can be read again as a confirmation.
+- *Another arm X is the candidate.* X is confirmed against v1 by the stages below. Its accuracy on the same test items
+  against Kev-9B v2 is reported next to each stage (`versus`: v2's round-27 test reads and its family breadth-v1 test read;
+  accuracy only, which does not depend on T). Replacing v2 with X is Jared's decision, and only if X passes every stage.
+
+**Confirmation** (X only, each read once; round 24's stages at 9B):
+- `tests`:
+  - breadth-v1 test accuracy lower > 0 (the same four sources out; all 14 reported);
+  - tasksource-heldout-v1 test lower > 0 (the seven families out);
+  - pooled hard-v1 + devtools-v1 (without `flakeflagger` and `commitpackft_type`) + documents-v1 test lower ≥ −1 pp;
+  - documents-v2 and longdoc-v1 test (CUAD by length, generated) reported.
+  - Parent test reads: `runs/fam-9b-breadthtest` and round 27's `runs/r27c-9b-parent-{hardtest,devtest,docs1test,docs2}`. New:
+    `runs/r29c-9b-parent-{tshtest,longdoctest}`.
+- `locked`: transfer-v4 locked accuracy ≥ v1's − 1 pp, and served Brier ≤ v1's + 0.005 (`kev-9b-r29-ungated`). This is round 24's
+  construction: its absolute bars were Kev-27B's own −1 pp / +0.005.
+- Before any release, the bf16 serving check: `modal_app.py::serving --run /runs/<X>/checkpoint --gpu H100 --name
+  serving-9b-r29 --flags=--isolation`, max |Δp| ≤ 0.03 and ≤ 1 flip in 280. The release temperature is the pool fit, written
+  by `scripts/calibrate_checkpoint.py` as in round 28.
+
+**Blocker.** The CUAD guards gate, so round 29 cannot be read out until the longdoc-v1 reads can be made at 9B (round 28's
+blocker: the family test reads ran out of memory at the first 32k record). The rule is not changed to get around that. Making
+the long panel report-only at 9B would be a re-registration, and that is Jared's call, before any round-29 read.
+
+**Reads this round needs that do not exist yet** (the sweep after merge; H100):
+
+| phase | reads | count |
+|---|---|---|
+| A (now) | parent `r29-P9-{tsheld,ood}`; `breadth` for the 10 arms other than 18a; `tsheld` and `ood` for all 11; `hard` and `devtools` for r7 ×2, r9 ×3, r11 ×2; `r3test` for r7 ×2 and r9 ×3; `r3cal` for the 9 arms other than 18a / 18b | 2 + 10 + 22 + 14 + 5 + 9 = 62 |
+| B (after the memory fix) | `longdoc`, `agentsood`, `guardood` for the parent and all 11 arms | 36 |
+| confirmation (X ≠ 18a only) | `r29c-9b-cand-{breadthtest,tshtest,hardtest,devtest,docs1test,docs2}`, `r29c-9b-parent-tshtest`, the locked read, the serving check; phase B: `r29c-9b-{cand,parent}-longdoctest` | 7 + 1 + 2 = 10, + serving |
+
+Existing reads it uses:
+- parent: `runs/fam-9b-breadth`, `hv1-P9`, `dt1-P9`, `docs1-P9`, `n2-9b-du-v9`, `rc-parent-r3test`, `r5r-P9-semif`, the locked read;
+- arms: their rounds' `docs` / `v9` / `semif` (and `hard` / `devtools` / `r3test` for r11, r16 and r18); round 27's `r27-9b-r18{a,b}-r3cal`;
+  `runs/fam-9bnew-breadth` for 18a; every trial's in-trial transfer-v4 read.
+
+They are in the research checkout, `/tmp/kev-r27` (fam-9b*, not yet committed) and the volume.
+
+**Budget (rounds 28 + 29 together).** H100 at $5.675/h per container (`kev.budget.hourly_rate`). Expected costs are estimated
+from past reads' latencies at 9B (breadth ~10 min, hard ~7, tasksource-heldout ~6, ood ~6.5, the short suites ~4-5, each
+including the load); the 4B and 0.8B are cheaper.
+
+| part | reads | expected | admission bound |
+|---|---|---|---|
+| phase A | 68 (6 + 62) | ≈ $40 | $193 (68 × $2.84 at 1,800 s) |
+| phase B | 42 (6 + 36) | ≈ $115 | $318 (14 longdoc × $17.03 at 10,800 s + 28 × $2.84) |
+| round 29 confirmation, if X ≠ 18a | 10 (8 now, 2 phase B) + serving | ≈ $30 | ≈ $77 |
+| round 28 confirmation | 0 (existing rows) | $0 | $0 |
+| **total** | 120 + serving | **≈ $185** | $588 if all in flight at once |
+
+The cap is $300 with a 10 % reserve, so $270 is plannable against the metered reading at launch. At registration Modal read
+$4,633.77 metered (2026-09-30T22:45Z); the last night ceiling was $5,980.
+
+The expected total fits. The bounds do not fit all at once, so the sweep launches in waves, each while (metered − baseline) +
+the bounds in flight < $270. Order: phase A; round 28's read-out; the memory-fix PR; phase B, longdoc first; round 29's
+read-out; then confirmation. A 9B agents-ood read may need more than its 1,800 s default (Kev-27B's took about 66 min):
+relaunch it alone with `--timeout 3600` rather than raising the spec's `read_timeout`, which would double every 9B bound.
+
+## Round 29 result (2026-10-01) — no candidate; Kev-9B v2 stands (read out with ten arms' longdoc reads missing)
+
+**Verdict** (`runs/r29-readout/round29.json`, `readout.txt`): **no arm passes**, so there is no candidate, no confirmation is
+read, and Kev-9B v2's release stands as round 27 registered it. The read-out is not complete: phase B's longdoc-v1 reads of
+the ten arms other than `9b-r18a` were stopped at 750-800 of 1,200 records for the budget (below), so the engine marks those
+arms `incomplete`. That cannot change the verdict. Every arm already fails primary 1's tasksource-heldout-v1 condition
+(accuracy lower bound > 0) on reads that are complete, and a missing read can only add failures: an arm passes only if every
+criterion passes.
+
+Against Kev-9B v1 (`jaredpalmer/kev-9b@2629c06a`, shipped T 2.30), each arm at the pool T; accuracy Δ in pp [95 % CI],
+paired record-clustered bootstrap:
+
+| arm | breadth-v1 dev (audited) | tasksource-heldout-v1 dev (audited) | Kev panel | short state | longdoc CUAD | failed criteria |
+|---|---|---|---|---|---|---|
+| `9b-r7-s1` | +0.9 [+0.2, +1.7] | −0.1 [−1.0, +0.9] | +1.2 [+0.4, +2.1] | −1.0 [−2.0, −0.2] | not read | `1_tasksource_heldout_lower_above_0` |
+| `9b-r7-s2` | +0.7 [+0.0, +1.5] | −0.6 [−1.5, +0.4] | +1.9 [+1.1, +2.8] | −0.8 [−1.8, +0.2] | not read | `1_breadth`, `1_tasksource_heldout` |
+| `9b-r9-a` | +1.0 [+0.3, +1.8] | −0.8 [−1.7, +0.2] | +1.7 [+0.8, +2.6] | −0.5 [−1.5, +0.4] | not read | `1_tasksource_heldout` |
+| `9b-r9-b` | +0.5 [−0.1, +1.1] | −0.1 [−1.0, +0.8] | +1.5 [+0.7, +2.3] | −0.1 [−0.9, +0.6] | not read | `1_breadth`, `1_tasksource_heldout` |
+| `9b-r9-c` | +0.6 [−0.0, +1.2] | −0.7 [−1.6, +0.2] | +1.6 [+0.8, +2.4] | −0.5 [−1.4, +0.3] | not read | `1_breadth`, `1_tasksource_heldout` |
+| `9b-r11-s4` | +0.3 [−0.4, +1.0] | −0.5 [−1.4, +0.5] | +1.6 [+0.8, +2.4] | −0.7 [−1.5, +0.0] | not read | `1_breadth`, `1_tasksource_heldout`, `3_kev_ece` |
+| `9b-r11-s5` | +0.4 [−0.2, +1.2] | −0.8 [−1.8, +0.2] | +1.2 [+0.3, +2.1] | −1.1 [−2.1, −0.1] | not read | `1_breadth`, `1_tasksource_heldout`, `2_short_acc`, `3_kev_ece` |
+| `9b-r16-lr1e5` | +0.3 [−0.7, +1.2] | −0.9 [−2.3, +0.5] | +8.7 [+7.4, +10.0] | −0.3 [−1.5, +0.9] | not read | `1_breadth`, `1_tasksource_heldout`, `3_kev_ece` |
+| `9b-r16-lr2e5` | +0.6 [−0.4, +1.5] | −0.7 [−2.1, +0.7] | +9.9 [+8.6, +11.2] | −0.1 [−1.3, +1.1] | not read | `1_breadth`, `1_tasksource_heldout`, `3_kev_ece` |
+| `9b-r18a` (= v2) | +0.2 [−0.8, +1.2] | +0.6 [−0.8, +2.0] | +12.6 [+11.3, +14.1] | +0.1 [−1.1, +1.2] | +2.5 [+0.8, +4.3] | `1_breadth`, `1_tasksource_heldout` |
+| `9b-r18b` | +0.2 [−0.8, +1.2] | −0.3 [−1.6, +1.1] | +10.8 [+9.4, +12.2] | −0.4 [−1.5, +0.8] | not read | `1_breadth`, `1_tasksource_heldout`, `3_kev_ece` |
+
+(`1_breadth` = `1_breadth_lower_above_0`, `1_tasksource_heldout` = `1_tasksource_heldout_lower_above_0`, `2_short_acc` =
+`2_short_acc_lower_at_least_minus_2pp`, `3_kev_ece` = `3_kev_ece_at_most_parent_plus_0.01`.)
+
+- **What it says.** None of the eleven 9B deltas of rounds 7-18 beats Kev-9B v1 on held-out *datasets* by a resolvable
+  margin: the documents-only deltas buy +0.5 to +1.0 pp on breadth-v1 (two of them with a lower bound above 0) and lose
+  0.1-0.9 pp on tasksource-heldout-v1; the skills deltas (16, 18) gain 8.7-12.6 pp on the trained-family Kev panel and nothing
+  measurable on either held-out panel. The audited rule would not have selected v2 either; v2 was selected by round 27's rule
+  (trained-family panels with held-out guards), and it passes every guard and calibration criterion here.
+- **Kev-9B v2 (`9b-r18a`) against v1**, complete: breadth-v1 dev 0.781 vs 0.779, tasksource-heldout-v1 dev 0.706 vs 0.700
+  (ECE 0.032 vs 0.057), Kev panel 0.849 vs 0.723, short state 0.871 both, longdoc-v1 CUAD 0.837 vs 0.811 (+2.5 [+0.8, +4.3];
+  16k+ 0.810 vs 0.792), ood-v2 0.889 vs 0.882. Its CUAD guards pass.
+- Outcome under the registration's "What each outcome means": *No arm passes*. The result is recorded, including v2's
+  own primary failures as information. Nothing is confirmed and no test partition was read.
+
+**Reads and budget.** Phase B ran on H100 (`kev-sweepB`). Read and committed: `r29-P9-longdoc` and `r29-9b-r18a-longdoc`.
+Stopped: the other ten arms' longdoc reads, launched 16:05Z with one job per detached `modal run`. They were stopped at
+18:40Z at 750-800 of 1,200 records, because the workspace read $4,987.19 metered (September $4,682.78 + October) against the
+session's $5,100 stop. Their own remaining ≈ 2.1 h × 10 × $5.675 ≈ $119 would have crossed it with no other spend, and other
+sessions' jobs were adding about $40-90/h. Their partial `predictions.jsonl` stay on the volume. Not launched: agents-ood-v1
+and guardrails-ood-v1 for the parent and all eleven arms (24 reads, ≈ $180 at the 9B rates measured here: agents-ood about
+10 s per record at 4B). Both panels are report only (`optional`), so their absence leaves the comparisons complete. Finishing
+the read-out formally needs the ten longdoc reads (≈ $270 from scratch at about 4.7 h each), and it would not change the
+verdict.
 
 ## Record
 
@@ -2326,10 +3155,19 @@ outcomes.
 | Round 22 | 09-26/27 | round 21's science and rule on `sft-v2-r22` (145,840 records) with `--pass_tokens_max 40960`, one arm (lr 2e-6), 4 candidates (snapshots s25 / s50 / s75 + final) | no candidate (0 of 4): primaries pass and grow with training (final breadth +1.3, tasksource-heldout +3.8, Kev panel +7.8); every candidate fails scienthoon and CUAD ECE at 16k+, three the pooled externals, s75 and the final short-state accuracy; calm-called-angry errors gone, angry missed instead; Modal gave 2 of 3 attempts, final finished by a manual continuation | `r22.json`; `runs/r22-readout`, `runs/r22-breadth-report`, `runs/r22-scienthoon`; "Round 22 result" |
 | scienthoon removed | 09-27 | `evals/external/scienthoon-v1` removed as unsound for a gate (saturated `queue`, text-unknowable `priority`, 15 of 291 `angry` labels contradicting the text) | past verdicts stand; pooled externals = SemIf + WANLI-v2 + TypeSafe from round 23 | "scienthoon removed"; `kev.suite.REMOVED_SUITES` |
 | Round 24 | 09-27 | retrospective selection: the 2026-09-27 audit's suite verdicts as one rule on all 12 full-weight 27B checkpoints (rounds 19, 20, 22), no training or new read | candidate `27b-r22-final` (2 of 12 pass: it and `27b-r20a-w85`); **not confirmed**: tests stage passed (breadth-v1 test +1.5, tasksource-heldout-v1 test +5.3, pooled +8.6; test breadth index 53.7 vs Jev 54.0, Kev-27B 50.2), locked transfer-v4 0.8841 < 0.886 (580 of 656, 582 needed); CUAD test −1.8; not released | `r24.json`; `runs/r24-readout`, `runs/r24-verdict`, `runs/r24-breadth-report`; "Round 24 result", "Round 24 confirmation" |
-| Round 23 | 09-27/28 | post-hoc, no training: round 22's final blended toward Kev-27B's own weights (LoRA merged in fp32), α 0.85 / 0.70 / 0.50 × {SFT head, blended head}; re-registered 09-28 on round 24's audited rule and confirmation (the first registration, on round 22's rule, never launched) | registered | `r23.json`; "Round 23 (registered)" |
+| Round 23 | 09-27/28 | post-hoc, no training: round 22's final blended toward Kev-27B's own weights (LoRA merged in fp32), α 0.85 / 0.70 / 0.50 × {SFT head, blended head}; re-registered 09-28 on round 24's audited rule and confirmation (the first registration, on round 22's rule, never launched) | **`27b-k-w85` confirmed** (5 of 6 pass the rule; tests stage passed; locked transfer-v4 0.8887, 583 of 656, bar 582); released as Kev-27B v2 on 09-30 | `r23.json`; `runs/r23-readout`, `runs/r23-verdict`; "Round 23 result", "Round 23 confirmation", "Released: Kev-27B v2" |
+| Release: Kev-27B v2 | 09-30 | round 23's `27b-k-w85` published to `jaredpalmer/kev-27b` main (full bf16 weights `d27af6ab…`, head `7968f17b…`, T 1.3195) in one commit that deleted v1's adapter files; v1 tagged `v1-lora` first | **released**; anonymous Hub load reproduced round 23's semif-v1 and transfer-v4 development reads row for row; `@v1-lora` loads v1 at T 1.38 | `runs/release/kev-27b-r23-published.json`; `runs/rel27-public/`; "Released: Kev-27B v2" |
 | Round 25 | 09-28/29 | continued full-weight SFT from Kev-27B (LoRA merged) on `sft-v2-r25` (breadth + b1v2 replay, no long-document families, states ≤ 16k), lr 1e-6 / 2e-6, 8 candidates (snapshots + finals), round 24's rule | no candidate (0 of 8): every arm fails breadth ECE (0.023-0.035 vs 0.0176); lr 1e-6 s75 / final fail only that (11/12); lr 2e-6 also short-state accuracy and the breadth primary; CUAD accuracy held, CUAD ECE did not; none ahead of `27b-k-w85` (report only) | `r25.json`; `runs/r25-readout`; "Round 25 result" |
-| Round 26 | 09-29 | round 25's lr 1e-6 arm with tasksource-v1 doubled (`sft-v2-r26`: sft-v2-r25 + 13,000 tasksource-v1 records, 58,515), one study, 4 candidates, round 24's rule | registered | `r26.json`; "Round 26 (registered)" |
+| Round 26 | 09-29 | round 25's lr 1e-6 arm with tasksource-v1 doubled (`sft-v2-r26`: sft-v2-r25 + 13,000 tasksource-v1 records, 58,515), one study, 4 candidates, round 24's rule | no candidate (0 of 4): every arm fails breadth ECE (0.020-0.029 vs 0.0176); the final fails only that (11/12), the snapshots also the breadth primary, s50 also short-state accuracy; against round 25's lr 1e-6 arm breadth and breadth ECE level (report only); none ahead of `27b-k-w85` (report only) | `r26.json`; `runs/r26-readout`; "Round 26 result" |
+| WANLI and TypeSafe removed | 09-30 | `evals/external/{wanli-v2, wanli-v1, typesafe-v1}` removed as unsound for a gate (a quarter of WANLI's gold labels are one of two disagreeing annotators'; TypeSafe's gold is two closed frontier models' averaged answer, split-half r about 0) | past verdicts stand; SemIf is the only external read from round 27, report only | "WANLI and TypeSafe removed"; `kev.suite.REMOVED_SUITES` |
+| Round 27 | 09-30 | post-hoc, no training: round 18's two 9B documents + skills deltas on the audited rule at a held-out-pool temperature | **`9b-r18a` confirmed** (both arms pass; tests: pooled +18.7, documents-v1 +7.1; locked transfer-v4 +0.0 [−1.7, +1.8], Brier −0.025); staged as Kev-9B v2, not published | `r27.json`; "Round 27 result"; `runs/r27-readout`, `runs/r27-verdict` |
+| Release: Kev-9B v2 | 09-30 | round 27's `9b-r18a` published to `jaredpalmer/kev-9b` main (`b5d8c18e`, adapter `2b2a70cf…`, T 2.19); v1 tagged `v1` first | **released**; anonymous Hub load reproduces round 18's reads (argmax 252/252, 764/764); `@v1` loads v1 at T 2.30 | "Released: Kev-9B v2"; `runs/rel9-public/` |
+| Round 28 | 09-30 | post-hoc, no training: Kev-4B / Kev-0.8B temperatures refitted on the held-out pool; validated context length per size (report only) | no candidate at either size: `4b-r10` fails both primaries (Brier −0.0001 [−0.0005, +0.0003], ECE 0.0252 vs 0.0240); `08b-r15` passes both and fails the hard / devtools / documents ECE guards; shipped T 2.41 / 2.35 stay; validated context (report only) 8,192 for 0.8B / 4B / 9B v2, 65,536 for 27B v2 (re-read 10-01 with every phase-B panel; verdict unchanged) | `r28.json`; `runs/r28-readout` (`context.{json,md}`); "Round 28 result" |
+| Round 29 | 10-01 | post-hoc, no training: the eleven 9B deltas of rounds 7-18 against Kev-9B v1 under round 24's audited rule, pool T | **no candidate**: every arm fails the tasksource-heldout-v1 primary (lower bound > 0), and all but `9b-r7-s1` / `9b-r9-a` also breadth-v1; Kev-9B v2 stands. Ten arms' longdoc reads stopped for the budget (verdict-neutral); agents / guardrails OOD not read | `r29.json`; `runs/r29-readout`; "Round 29 result" |
+| Kev 1.0 (release candidate) | 09-30 | the four released checkpoints versioned as one family: formal cards for all four, README family table, release notes and asset builder; no training, no new read | packaged (PR #206); validated context 8,192 (0.8B, 4B, 9B) / 65,536 (27B); the baseline Kev 2 is measured against | "Kev 1.0 baseline"; `docs/releases/kev-1.0.md`, `docs/releases/kev-1.0-assets.json` |
+| Release: Kev 1.0 | 10-01 | the four checkpoints published as one versioned family: card-only Hub commits + tag `v1.0` on each (0.8B `bf75a6a8`, 4B `6cfce5c2`, 9B `db029f08`, 27B `af0e6d55`; weights unchanged), GitHub release `kev-1.0` with three deterministic adapter tarballs + `SHA256SUMS.txt`, `kev-family` retired to a pointer | **released**; anonymous `@v1.0` loads at T 2.35 / 2.41 / 2.19 / 1.32 with matching hashes, smoke reads and tarball logits identical to the tag's, assets re-downloaded and checked, Space `/decide` answers | "Released: Kev 1.0"; `runs/release/kev-1.0.json` |
 | breadth-v1 | 09-24 | frozen eval-only panel over the Decision Index's five areas (14 held-out datasets, 150 records each, locked test unread); development baselines | report: chance-corrected index Jev 53.3, AutoJev-27B 51.7, Kev-27B 50.2, Kev-4B 40.8 (Kev-27B vs Jev −3.1 [−6.2, +0.1]); Kev-27B trails most on retrieval (SGD, CLINC150) | `evals/breadth-v1/manifest.json`; `runs/breadth-v1-report/report.md` |
+| drift-v1 | 09-30 | why Kev-27B v1's semif-v1 logits differ between its 09-23 read and the 09-30 public read (max \|Δp\| 0.032, argmax equal) | report: #125's causal-conv1d CUDA kernel in the Modal image (replacing transformers' PyTorch conv in the 48 DeltaNet layers); no code drift (09-23 code and `main` bit-identical on the same kernels), no nondeterminism; breadth-v1 offset acc −0.1 pp, ECE +0.0008, 13/3,075 flips, below every round-25/26 margin; fp32 Qwen3.5 reads on CUDA carry fla's TF32 dots (≈ 0.003 in p) | `runs/drift-v1/REPORT.md`; AGENTS.md "What fp32-exact guarantees" |
 
 Older milestones, all in `A:PLAN.md` (sections named in parentheses):
 

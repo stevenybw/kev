@@ -34,15 +34,16 @@ Modal's official skill and documentation, which helps with anything beyond this 
 | `jaredpalmer/kev-0.8b` | L4 (L40S) | 0.80 | 23 / 16 ms | ~40 s | cheapest, prototyping |
 | `jaredpalmer/kev-4b` (default) | L40S (H100) | 1.95 | 42 / 28 ms (H100: 18 / 13 ms) | ~35 s | the default: best quality per dollar |
 | `jaredpalmer/kev-9b` | H100 (H200, L40S) | 3.95 | 24 / 17 ms | ~55 s | accuracy on smaller GPUs |
-| `jaredpalmer/kev-27b` | B200 (H200, H100) | 6.25 | 47 / 32 ms (H200: 65 / 48 ms) | ~50 s | best released accuracy and calibration; 55 GB of weights |
+| `jaredpalmer/kev-27b` | B200 (H200, H100) | 6.25 | 47 / 32 ms (H200: 67 / 50 ms) | ~50 s | best released accuracy; 51 GB of full weights |
 
 Model time is the `latency_ms` the API returns (median of 20 requests, measured in the Kev repo: `runs/serve-*`,
-`runs/grouping-4b-h100` and `runs/fused-27b-*`). A new state is the normal call, since every ticket is a
+`runs/grouping-4b-h100`, `runs/fused-27b-*` and `runs/serving-27b-r23`; Kev-27B's B200 and H100 figures were measured on its
+previous version, the same architecture in bf16). A new state is the normal call, since every ticket is a
 new state; a repeated state is served from a prefix cache. The very first cold start of an account also downloads the
 weights and compiles kernels (1-2 minutes); both are cached on the `kev-hf-cache` volume afterwards. Other GPUs work with
 `KEV_GPU` but are worse picks: an L4 runs out of compute on Kev-4B, and an A100 is slower than an L40S here and costs more.
 Kev-27B is compute-bound under load: a B200 serves ~57 mixed requests/s at 64 concurrent clients (H200 ~40, H100 ~36) for
-about the same cost per request, with the lowest latency. Its first cold start downloads 55 GB of weights (several minutes).
+about the same cost per request, with the lowest latency. Its first cold start downloads 51 GB of weights (several minutes).
 
 A warm container costs the GPU's hourly rate only while it is up; after five idle minutes it scales to zero.
 `KEV_MIN_CONTAINERS=1` keeps one warm (no cold starts, pays the hourly rate all the time). `@revision` pins a checkpoint
@@ -64,7 +65,8 @@ Settings are read at deploy time; redeploying with other values replaces the mod
 `KEV_GPU=H100` overrides the GPU list (comma-separated). `KEV_REGION=us` (or `us-east`, `eu`, ...) pins where the container
 runs: without it Modal takes the first region with a free GPU, which can be another continent (an unpinned Kev-4B landed in
 Frankfurt and added ~150 ms to every round trip from the US). A pinned region costs 1.15-1.75x on Modal; pin it near the
-callers for latency-sensitive use.
+callers for latency-sensitive use. `KEV_TRUNCATE_STATES=1` reads the first 65,536 tokens of a longer document instead
+of refusing it (see Long documents under Troubleshooting).
 
 ### Throughput
 
@@ -142,4 +144,15 @@ modal volume delete kev-hf-cache   # optional: the cached weights (shared with k
 - **Slow round trips with fast `latency_ms`**: the container is far from the caller or every request opens a new
   connection; set `KEV_REGION` and reuse the HTTP client.
 - **401 with the right key**: the key is fixed at deploy time; redeploy with the same `KEV_API_KEY` exported.
+- **Long documents**: a state may have up to 65,536 tokens and a question with its options 8,192 more (more when the
+  state is shorter). A longer state gets a 422 that gives its token count and the limit (the TypeSafe SDK raises
+  `TypeSafeUnprocessableEntityError` with that message), as a longer question does: shorten or split the document.
+  Deploying with `KEV_TRUNCATE_STATES=1` reads only the first 65,536 tokens instead, and then every response carries
+  `truncated` and `usage.state_tokens` / `state_tokens_used`. Kev-27B
+  trained on states of up to 32,768 tokens and the smaller models on 384, so all four accept long documents but Kev-27B
+  answers them best. A new long state is slow, a repeated one is served from the prefix cache: Kev-27B on an H200 took
+  8-10 s for a 60k-token state and 0.28 s for the same request again; a 70k-token state read to 65,536 tokens with
+  `KEV_TRUNCATE_STATES=1` took 12 s, then 0.29 s. The cache holds 65,536 state tokens in all, so a new state that long
+  replaces the cached one, which is dropped before the new state's pass rather than after it (no second copy resident)
+  (`runs/kev-deploy-71d4829` and `runs/kev-deploy-2ea5660` in the repo).
 - **Logs**: `modal app logs kev` shows the load line (`serving <model> on <GPU> ... ready in Ns`) and every request.

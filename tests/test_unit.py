@@ -271,6 +271,34 @@ def test_prefix_cache_bounds_the_state_tokens_it_holds():
     assert list(c.entries.values()) == ["pd", "pe"]            # 12 would not: the least recently used goes
 
 
+def test_prefix_cache_makes_room_before_the_batch():
+    """kev.serve.PrefixCache.make_room (Server._run, between plan and the passes): the entries store() will evict are
+    dropped before the batch runs, so a new long state is not computed next to the one it replaces, and the cache after
+    store() is the one it would have been without make_room (random batches of hits, new states, uncacheable ones)."""
+    import random
+    from kev.serve import PrefixCache
+    enc = lambda state: {"ids": list(state) + [0] * 5, "seg": [0] * len(state) + [1] * 5}
+    c = PrefixCache(size=4, min_tokens=0, max_tokens=10)
+    c.store(*c.plan([enc("a" * 6)])[:2], ["pa"])
+    keys, cached, keep = c.plan([enc("b" * 6)])
+    c.make_room(keys, cached, keep)
+    assert c.entries == {}                                     # 6 + 6 tokens will not fit: a goes before b runs
+    c.store(keys, cached, ["pb"])
+    keys, cached, keep = c.plan([enc("b" * 6), enc("c" * 3)])
+    c.make_room(keys, cached, keep)
+    assert list(c.entries.values()) == ["pb"]                  # a hit stays; 6 + 3 fit
+    rng = random.Random(0)
+    for size, bound in ((2, 10), (3, 8), (4, 12)):
+        a, b = PrefixCache(size=size, min_tokens=2, max_tokens=bound), PrefixCache(size=size, min_tokens=2, max_tokens=bound)
+        for step in range(300):
+            batch = [enc(rng.choice("abcdef") * rng.randint(1, bound + 1)) for _ in range(rng.randint(1, 4))]
+            for cache, room in ((a, False), (b, True)):
+                keys, cached, keep = cache.plan(batch)
+                if room: cache.make_room(keys, cached, keep)
+                cache.store(keys, cached, [old if old is not None else (f"p{step}-{i}" if k else None) for i, (old, k) in enumerate(zip(cached, keep))])
+            assert list(a.entries.items()) == list(b.entries.items()) and (a.hits, a.misses) == (b.hits, b.misses), step
+
+
 def test_out_of_memory_drops_the_prefix_cache_and_retries_once():
     """kev.serve.Server._run: a pass out of device memory with states cached clears the cache and runs once more (#75: a
     full cache kept failing every later batch); a second failure fails the batch with the cache left empty, and an
@@ -294,7 +322,7 @@ def test_out_of_memory_drops_the_prefix_cache_and_retries_once():
             if self.fail == "other": raise ValueError("not memory")
             return [[torch.tensor([0.5, 0.5])] for _ in encs], [("prefix", self.calls) if k else None for k in keep]
 
-    enc = lambda state: {"ids": list(state) + [9], "seg": [0] * len(state) + [1]}
+    enc = lambda state: {"ids": list(state) + [9], "seg": [0] * len(state) + [1], "state_tokens": len(state)}
     model = Model()
     s = Server(SimpleNamespace(release_date=lambda: "2026-01-01"), None, model, "cpu")
     try:
@@ -313,6 +341,12 @@ def test_out_of_memory_drops_the_prefix_cache_and_retries_once():
         model.fail = None; s.probs(enc("abc")); model.fail, model.calls = "other", 0
         with pytest.raises(ValueError): s.probs(enc("abc"))
         assert model.calls == 1 and len(s.prefix_cache.entries) == 1
+        # make_room drops the batch's own hit "abc" before the pass (the batch's newer "xyz" takes the only slot), so the
+        # cache is empty when the pass fails, yet the pass holds that hit's state: it still retries, the hit as a miss
+        s.prefix_cache.size, model.fail, model.calls = 1, "cached", 0
+        with s.lock: out = s._run([enc("abc"), enc("xyz")])
+        assert model.calls == 2 and s.prefix_cache.oom_retries == 3 and [o[1]["prefix_cache_hit"] for o in out] == [False, False]
+        assert list(s.prefix_cache.entries) == [(tuple("xyz"), False)]
     finally:
         s.close()
     assert out_of_memory(RuntimeError("MPS backend out of memory (MPS allocated: 1 GB)")) and not out_of_memory(RuntimeError("shape mismatch"))
@@ -384,6 +418,187 @@ def test_bearer_auth_and_request_id(monkeypatch):
         assert client.get("/openapi.json").status_code == 200   # only /v1 is gated
 
 
+# --- serving admission (kev.model.admit through kev.serve.Server.submit): refuse an over-length state, never cut it silently
+
+@pytest.fixture(scope="module")
+def tiny_model(tiny_base):
+    """The tiny hybrid base as a DecisionModel (random pointer head) and its tokenizer, on CPU in fp32."""
+    from transformers import AutoTokenizer
+    tok = AutoTokenizer.from_pretrained(tiny_base / "base")
+    torch.manual_seed(0)
+    return tok, DecisionModel(str(tiny_base / "base"), tok, "cpu").eval()
+
+
+LIMIT, ROW = 8, 64   # the serving limits in these tests: <state> + 7 words ("it" is one token of the tiny vocabulary), and a 64-token row
+
+
+@pytest.fixture
+def tiny_serve(tiny_model, monkeypatch):
+    """-> post(body, truncate=False) -> (status, json) against /v1/systemone on the tiny model, with the serving limits
+    shrunk to LIMIT state tokens and a ROW-token row (state + one question), and the Server behind each call."""
+    from fastapi.testclient import TestClient
+    import kev.model as M
+    from kev import serve
+    tok, model = tiny_model
+    monkeypatch.setattr(M, "SERVE_MAX_STATE", LIMIT); monkeypatch.setattr(M, "SERVE_MAX_BRANCH", ROW); monkeypatch.setattr(serve, "SERVE_MAX_STATE", LIMIT)
+    servers = {}
+
+    def post(body, truncate=False, path="/v1/systemone"):
+        if truncate not in servers: servers[truncate] = serve.Server(SimpleNamespace(release_date=lambda: "2026-01-01"), tok, model, "cpu", truncate_states=truncate)
+        monkeypatch.setattr(serve, "server", lambda: servers[truncate])
+        with TestClient(serve.app) as client:
+            r = client.post(path, json=body)
+        return r.status_code, r.json()
+    yield post
+    for s in servers.values(): s.close()
+
+
+def request(words, instructions="which team"):
+    return {"state": " ".join(["it"] * words), "model": "kev-latest",
+            "questions": {"team": {"type": "choice", "instructions": instructions, "criteria": {"billing": None, "shipping": None, "refund": None}}}}
+
+
+def test_serve_refuses_an_over_length_state(tiny_serve):
+    """The default: a state one token over the limit is a 422 that says how long it is, the limit, and how to fix it
+    (the TypeSafe SDKs raise it as TypeSafeUnprocessableEntityError with this text: tests/test_api.py)."""
+    code, body = tiny_serve(request(LIMIT))            # <state> + LIMIT words = LIMIT + 1 tokens
+    assert code == 422
+    assert body["detail"].startswith(f"state is {LIMIT + 1} tokens, over the {LIMIT}-token limit (the <state> token included)")
+    assert "split it across requests" in body["detail"] and "KEV_TRUNCATE_STATES=1" in body["detail"]
+
+
+def test_serve_admits_a_state_exactly_at_the_limit(tiny_serve):
+    """LIMIT tokens with <state> is admitted and read whole; a server that cannot truncate keeps the TypeSafe body as it was."""
+    code, body = tiny_serve(request(LIMIT - 1))
+    assert code == 200 and set(body) == {"model", "answers", "usage", "latency_ms"} and set(body["usage"]) == {"input_tokens", "output_tokens"}
+    code, opted = tiny_serve(request(LIMIT - 1), truncate=True)
+    assert code == 200 and opted["truncated"] is False and (opted["usage"]["state_tokens"], opted["usage"]["state_tokens_used"]) == (LIMIT, LIMIT)
+    assert opted["answers"] == body["answers"] and opted["usage"]["input_tokens"] == body["usage"]["input_tokens"]
+
+
+def test_serve_truncates_only_when_opted_in_and_says_so(tiny_serve):
+    """KEV_TRUNCATE_STATES=1 (Server.truncate_states): the over-length state is read to its first LIMIT tokens, the answers
+    are those of the cut state, and the response carries truncated: true with both counts; /separate reports it too."""
+    code, body = tiny_serve(request(LIMIT + 5), truncate=True)
+    assert code == 200 and body["truncated"] is True
+    assert (body["usage"]["state_tokens"], body["usage"]["state_tokens_used"]) == (LIMIT + 6, LIMIT)
+    code, cut = tiny_serve(request(LIMIT - 1), truncate=True)   # the same state cut by hand to LIMIT tokens
+    assert body["answers"] == cut["answers"] and body["usage"]["input_tokens"] == cut["usage"]["input_tokens"]
+    code, sep = tiny_serve(request(LIMIT + 5), truncate=True, path="/v1/systemone/separate")
+    assert code == 200 and sep["truncated"] is True and (sep["usage"]["state_tokens"], sep["usage"]["state_tokens_used"]) == (LIMIT + 6, LIMIT)
+    permute = lambda words, truncate: tiny_serve({"request": request(words), "question": "team", "n_perm": 2}, truncate=truncate, path="/v1/systemone/permute")
+    code, perm = permute(LIMIT + 5, True)
+    assert code == 200 and perm["truncated"] is True and perm["usage"] == {"state_tokens": LIMIT + 6, "state_tokens_used": LIMIT}
+    code, perm = permute(LIMIT - 1, False)
+    assert code == 200 and set(perm) == {"runs", "argmax_stable", "spread"}   # a default server's /permute body is unchanged
+    assert permute(LIMIT, False)[0] == 422
+
+
+def test_serve_refuses_a_long_question_either_way(tiny_serve):
+    """A question row (state + branch) over SERVE_MAX_BRANCH stays a 422 with or without truncation, and its message does
+    not offer KEV_TRUNCATE_STATES (cutting the state is not what it needs)."""
+    for truncate in (False, True):
+        code, body = tiny_serve(request(2, instructions="which team " * 40), truncate=truncate)
+        assert code == 422 and body["detail"].startswith("branch too long") and "KEV_TRUNCATE_STATES" not in body["detail"]
+
+
+def test_serve_models_card_reports_the_state_limit(tiny_model, monkeypatch):
+    from fastapi.testclient import TestClient
+    from kev import serve
+    tok, model = tiny_model
+    s = serve.Server(SimpleNamespace(release_date=lambda: "2026-01-01", requested="tiny", meta=SimpleNamespace(base="tiny", lora=0)), tok, model, "cpu")
+    try:
+        monkeypatch.setattr(serve, "server", lambda: s)
+        with TestClient(serve.app) as client:
+            card = client.get("/v1/models").json()["models"][0]
+        assert card["max_state_tokens"] == 65536 and card["truncate_states"] is False
+    finally:
+        s.close()
+
+
+def test_benchmark_refuses_over_length_records(tiny_model, tmp_path):
+    """kev.benchmark never truncates: LocalPredictor encodes strictly within its suite's context, so an over-length state
+    raises ContextOverflow; evaluate_records aborts on it (failure.json) or, for data scored as published (skip_overlong),
+    counts it rejected."""
+    from kev.benchmark import evaluate_records
+    from kev.model import ContextOverflow
+    from kev.predictors import LocalPredictor
+    tok, model = tiny_model
+    p = LocalPredictor.__new__(LocalPredictor)
+    p.tok, p.model, p.device, p.temperature = tok, model, "cpu", 1.0
+    p.context = {"max_state": LIMIT, "max_branch": ROW, "max_packed": 2 * ROW}
+    rec = lambda i, words: {**request(words), "questions": {"team": {**request(words)["questions"]["team"], "label": "billing", "src": "s"}}, "_meta": {"id": f"r{i}", "group_id": f"r{i}", "source": "s", "variant": "clean"}}
+    assert p(rec(0, LIMIT - 1))["input_tokens"] > LIMIT
+    with pytest.raises(ContextOverflow, match=f"state exceeds {LIMIT} tokens: {LIMIT + 1}"):
+        p(rec(1, LIMIT))
+    with pytest.raises(ContextOverflow):
+        evaluate_records([rec(0, LIMIT - 1), rec(1, LIMIT)], p, tmp_path / "strict")
+    report, _ = evaluate_records([rec(0, LIMIT - 1), rec(1, LIMIT), rec(2, 3)], p, tmp_path / "published", skip_overlong=True)
+    assert report["coverage"]["rejected_records"] == 1 and report["coverage"]["evaluated_records"] == 2 and report["coverage"]["truncated_records"] == 0
+
+
+@pytest.fixture
+def fake_endpoint():
+    """A local HTTP server standing in for a System One endpoint: -> (base_url, script) where script(state) is a list
+    of (status, body) answers for requests with that state, served in order (the last one repeats), and every request is
+    logged in script.calls."""
+    import http.server, json, threading
+    answers, calls = {}, []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            state = json.loads(self.rfile.read(int(self.headers["content-length"])))["state"]
+            calls.append(state)
+            queue = answers[state]; status, body = queue.pop(0) if len(queue) > 1 else queue[0]
+            data = json.dumps(body).encode()
+            self.send_response(status); self.send_header("content-type", "application/json"); self.send_header("content-length", str(len(data))); self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args): pass
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    script = lambda state, *replies: answers.__setitem__(state, list(replies))
+    script.calls = calls
+    yield f"http://127.0.0.1:{httpd.server_address[1]}", script
+    httpd.shutdown()
+
+
+def test_remote_predictor_counts_a_refusal_and_retries_only_transient_errors(fake_endpoint, tmp_path, monkeypatch):
+    """kev.benchmark --remote: an endpoint's 422 (kev.serve past its context; 400 / 413 likewise) raises ContextOverflow on
+    the first answer, so evaluate_records counts the record rejected under skip_overlong and stops cleanly otherwise
+    (failure.json names it). A 503 is retried and then answered; a 401 stops at once without retries."""
+    import json
+    from kev import predictors
+    from kev.benchmark import evaluate_records
+    from kev.model import ContextOverflow
+    monkeypatch.setattr(predictors.time, "sleep", lambda s: None)
+    url, script = fake_endpoint
+    ok = {"model": "kev-latest", "answers": {"team": {"type": "choice", "choice": "billing", "confidence": 0.5, "probabilities": {"billing": 0.7, "shipping": 0.2, "refund": 0.1}}},
+          "usage": {"input_tokens": 12, "output_tokens": 30}}
+    refused = {"detail": "state is 70,002 tokens, over the 65,536-token limit (the <state> token included): shorten the document or split it across requests"}
+    rec = lambda state: {**request(1), "state": state, "questions": {"team": {**request(1)["questions"]["team"], "label": "billing", "src": "s"}},
+                         "_meta": {"id": state, "group_id": state, "source": "s", "variant": "clean"}}
+    script("short", (200, ok)); script("long", (422, refused)); script("flaky", (503, {"detail": "busy"}), (503, {"detail": "busy"}), (200, ok)); script("key", (401, {"detail": "bad key"}))
+    p = predictors.RemotePredictor(url, retries=3)
+    with pytest.raises(ContextOverflow, match="HTTP 422.*70,002 tokens"):
+        p(rec("long"))
+    assert script.calls.count("long") == 1                                    # not retried
+    report, _ = evaluate_records([rec("short"), rec("long"), rec("flaky")], p, tmp_path / "published", skip_overlong=True)
+    assert (report["coverage"]["evaluated_records"], report["coverage"]["rejected_records"]) == (2, 1) and script.calls.count("flaky") == 3
+    assert json.loads((tmp_path / "published" / "rejected.json").read_text(encoding="utf-8"))[0]["id"] == "long"
+    with pytest.raises(ContextOverflow):
+        evaluate_records([rec("short"), rec("long")], p, tmp_path / "admitted")
+    assert json.loads((tmp_path / "admitted" / "failure.json").read_text(encoding="utf-8"))["error_type"] == "ContextOverflow"
+    with pytest.raises(RuntimeError, match="HTTP 401: bad key"):
+        p(rec("key"))
+    assert script.calls.count("key") == 1
+    script("down", (503, {"detail": "busy"}))
+    with pytest.raises(RuntimeError, match="failed after 3 attempts"):
+        p(rec("down"))
+    assert script.calls.count("down") == 3
+
+
 def test_option_isolation_mask_rule():
     from kev.model import branch_mask_batch, OPT_NONE, OPT_DECIDE
     seg = [0, 0, 1, 1, 1, 1, 1, 1, 1]           # state x2, then q: instr x2, option0 x2, option1 x2, decide
@@ -438,7 +653,7 @@ def test_full_weight_checkpoint_round_trip(tiny_base, tmp_path, monkeypatch):
     today's format marked weights="full"; kev.checkpoint loads the backbone from the checkpoint directory itself (bf16 by
     default, fp32 when asked) with exactly the saved values, and the trained weights moved away from the base."""
     from safetensors.torch import load_file
-    from kev.checkpoint import Checkpoint, LoadOptions, read_meta
+    from kev.checkpoint import Checkpoint, LoadOptions, mlx_available, read_meta
     from kev.data import load_records, materialize
     train_tiny(tiny_base, tmp_path / "full", *FULL, "--max_steps", "3", monkeypatch=monkeypatch)
     files = {p.name for p in (tmp_path / "full").iterdir()}
@@ -457,9 +672,9 @@ def test_full_weight_checkpoint_round_trip(tiny_base, tmp_path, monkeypatch):
     assert max(float((a - b).abs().max()) for a, b in zip(model.probs(model.encode(tok, rec)), fp32.probs(fp32.encode(tok, rec)))) < 0.02
     with pytest.raises(ValueError, match="lora_scale"):
         ck.load("cpu", LoadOptions(lora_scale=0.5))
-    with pytest.raises(ValueError, match="backend=torch"):                     # before importing mlx: the refusal, not an ImportError
-        ck.load("cpu", LoadOptions(backend="mlx"))
-    assert ck.backend("mps", LoadOptions(backend="auto")) == "torch"
+    with pytest.raises(ValueError, match="lora_scale"):                        # before importing mlx: the refusal, not an ImportError
+        ck.load("cpu", LoadOptions(backend="mlx", lora_scale=0.5))
+    assert ck.backend("mps", LoadOptions(backend="auto")) == ("mlx" if mlx_available() else "torch")   # full weights run on MLX too (tests/test_mlx.py)
 
 
 def test_full_weight_dtype_must_match_config(tiny_base, tmp_path, monkeypatch):
@@ -708,6 +923,32 @@ def test_merged_lora_checkpoint_initializes_full_weight_training(tiny_base, tmp_
         merge(tmp_path / "lora", tmp_path / "merged", log=lambda m: None)
     with pytest.raises(ValueError, match="full-weight checkpoint already"):
         merge(tmp_path / "sft", tmp_path / "again", log=lambda m: None)
+
+
+def test_merged_lora_checkpoint_in_bf16_rounds_the_fp32_merge_once(tiny_base, tmp_path, monkeypatch):
+    """merge_lora_checkpoint --weights_dtype bf16 on an fp32-trained LoRA (every Kev below 27B): each tensor is the fp32 merge
+    rounded once to bf16, the same bits as casting the fp32 full-weight export; config.json and head.pt say bf16 (the
+    loader's dtype check passes) and head.pt records both dtypes. A bf16-trained LoRA is unchanged by the flag."""
+    import json
+    from safetensors.torch import load_file
+    from kev.checkpoint import Checkpoint, read_meta
+    from scripts.merge_lora_checkpoint import merge
+    train_tiny(tiny_base, tmp_path / "lora", "--lora", "4", "--lr", "5e-2", "--max_steps", "3", monkeypatch=monkeypatch)
+    assert read_meta(tmp_path / "lora").weights_dtype == "fp32"
+    merge(tmp_path / "lora", tmp_path / "fp32", log=lambda m: None)
+    report = merge(tmp_path / "lora", tmp_path / "bf16", log=lambda m: None, weights_dtype="bf16")
+    fp32, bf16 = (load_file(tmp_path / d / "checkpoint/model.safetensors") for d in ("fp32", "bf16"))
+    assert fp32.keys() == bf16.keys() and all(fp32[k].dtype == torch.float32 and torch.equal(bf16[k], fp32[k].to(torch.bfloat16)) for k in fp32)
+    out = tmp_path / "bf16/checkpoint"
+    assert json.loads((out / "config.json").read_text(encoding="utf-8"))["dtype"] == "bfloat16"
+    meta = read_meta(out)
+    assert (meta.weights, meta.weights_dtype) == ("full", "bf16") and report["merged_lora"]["weights_dtype"] == {"trained": "fp32", "written": "bf16"}
+    assert Checkpoint(out).load("cpu")[1].dtype == "bfloat16"
+    train_tiny(tiny_base, tmp_path / "lora16", "--lora", "4", "--weights_dtype", "bf16", "--max_steps", "1", monkeypatch=monkeypatch)
+    plain, flagged = merge(tmp_path / "lora16", tmp_path / "p", log=lambda m: None), merge(tmp_path / "lora16", tmp_path / "f", log=lambda m: None, weights_dtype="bf16")
+    assert plain["weights_sha256"] == flagged["weights_sha256"] and "weights_dtype" not in flagged["merged_lora"]
+    with pytest.raises(ValueError, match="--weights_dtype"):
+        merge(tmp_path / "lora", tmp_path / "fp16", log=lambda m: None, weights_dtype="fp16")
 
 
 def test_master_adamw_is_adamw_on_fp32_masters():
@@ -968,11 +1209,119 @@ def test_local_predictor_scores_long_rows_through_the_shared_prefix(tiny_base, t
     assert shared == [True] and long["input_tokens"] == rows["input_tokens"] and "kernels" not in long and "kernels" not in rows
     for qid, z in rows["logits"].items():
         assert long["logits"][qid] == pytest.approx(z, abs=1e-5)
+    real_kernels, entered = P.long_row_kernels, []
+    monkeypatch.setattr(P, "long_row_kernels", lambda: (entered.append(True), real_kernels())[1])
+    evaluate_records([record], predictor, tmp_path / "long-cpu")
+    assert entered == []   # on the CPU a long row keeps the exact kernels
     monkeypatch.setattr(predictor, "device", "cuda"); monkeypatch.setattr(P, "sync", lambda device: None)   # the CUDA policy, on CPU tensors
     report, scored = evaluate_records([record], predictor, tmp_path / "long")
-    assert shared == [True, True] and [r["kernels"] for r in scored] == [P.LONG_ROW_KERNELS] * 2
+    assert entered == [True] and shared == [True, True, True] and [r["kernels"] for r in scored] == [P.LONG_ROW_KERNELS] * 2
     assert report["long_rows"] == {"count": 2, "records": 1, "kernels": [P.LONG_ROW_KERNELS], "threshold": ROW_PASS_TOKENS}
     assert [x for r in scored for x in r["logits"]] == pytest.approx([x for z in rows["logits"].values() for x in z.values()], abs=1e-5)
+    monkeypatch.setattr(P, "ROW_PASS_TOKENS", ROW_PASS_TOKENS)
+    short_report, short_rows = evaluate_records([record], predictor, tmp_path / "short-cuda")
+    assert entered == [True] and "long_rows" not in short_report and not any("kernels" in r for r in short_rows)   # under the threshold on CUDA: neither
+
+
+def test_long_row_kernels_repeat_fp32_keys_instead_of_grouped_attention(monkeypatch):
+    """kev.predictors.long_row_kernels: an fp32 SDPA call without a mask (a long unpadded state, kev.shared_prefix) repeats
+    its keys and values per query head instead of asking SDPA for `enable_gqa`, which only the flash and math kernels take
+    (flash has no fp32, so the call fell to math and its L x L scores: the small family's OOM on 32k-64k states). A bf16
+    call keeps `enable_gqa` (Kev-27B's flash kernel); outside the context nothing changes, and the output is the same
+    attention either way."""
+    from transformers.integrations import sdpa_attention as S
+    from kev.predictors import long_row_kernels
+    calls, real = [], torch.nn.functional.scaled_dot_product_attention
+    monkeypatch.setattr(torch.nn.functional, "scaled_dot_product_attention", lambda q, k, v, **kw: (calls.append((k.shape[1], kw.get("enable_gqa", False))), real(q, k, v, **kw))[1])
+    module = torch.nn.Module(); module.num_key_value_groups = 4
+    g = torch.Generator().manual_seed(0)
+    q, k, v = (torch.randn(1, h, 24, 16, generator=g) for h in (8, 2, 2))
+    grouped = S.use_gqa_in_sdpa
+    out, _ = S.sdpa_attention_forward(module, q, k, v, None, is_causal=True)
+    with long_row_kernels():
+        repeated, _ = S.sdpa_attention_forward(module, q, k, v, None, is_causal=True)
+        S.sdpa_attention_forward(module, q.bfloat16(), k.bfloat16(), v.bfloat16(), None, is_causal=True)
+        S.sdpa_attention_forward(module, q, k, v, torch.ones(1, 1, 24, 24, dtype=torch.bool).tril())   # a mask: transformers repeats anyway
+    assert S.use_gqa_in_sdpa is grouped   # restored
+    S.sdpa_attention_forward(module, q, k, v, None, is_causal=True)
+    assert calls == [(2, True), (8, False), (2, True), (8, False), (2, True)]
+    assert torch.allclose(out, repeated, atol=1e-6)
+
+
+def test_benchmark_report_records_the_kernel_environment(tiny_base, tmp_path, monkeypatch):
+    """report.json names the kernel set its logits depend on (runs/drift-v1/REPORT.md: a kernel added to the Modal image
+    moved Kev-27B v1's reads with no kev change): package versions, device, GPU, backbone dtype and the Gated DeltaNet
+    convolution and delta rule transformers bound. A kernel patched into the module (the exact-kernel parity tests do
+    that) or a rewritten layer forward (kev.fused_qwen35) is what gets named."""
+    import inspect, json, os, sys, types
+    from transformers.integrations import use_kernel_func_from_hub_with_fallback
+    from transformers.models.qwen3_5 import modeling_qwen3_5 as Q
+    from kev import benchmark, predictors as P
+    train_tiny(tiny_base, tmp_path / "full", *FULL, "--max_steps", "1", monkeypatch=monkeypatch)
+    monkeypatch.setenv("KEV_DTYPE", "fp32")
+    monkeypatch.setattr(sys, "argv", ["kev.benchmark", "--run", str(tmp_path / "full"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--out", str(tmp_path / "read")])
+    models, measure = [], P.kernel_environment
+    monkeypatch.setattr(P, "kernel_environment", lambda model, device: models.append(model) or measure(model, device))
+    benchmark.main()
+    env = json.loads((tmp_path / "read/report.json").read_text(encoding="utf-8"))["environment"]
+    assert env["device"] == "cpu" and env["gpu"] is None and env["backend"] == "torch" and env["dtype"] == "float32"
+    assert env["attention"] == models[0].lm.config._attn_implementation and env["triton_f32_default"] == os.environ.get("TRITON_F32_DEFAULT")
+    assert env["packages"]["torch"] == torch.__version__ and set(env["packages"]) == set(P.KERNEL_PACKAGES)
+    assert env["deltanet"] == {"forward": f"{Q.__name__}.Qwen3_5GatedDeltaNet.forward",
+                               **{name: P.bound_implementation(getattr(Q, name)) for name in P.DELTANET_KERNELS}}
+    # a package kernel transformers bound is what gets named (json.dumps standing in for fla / causal-conv1d)
+    assert P.bound_implementation(use_kernel_func_from_hub_with_fallback("dumps", "json")(lambda obj: None)) == "json.dumps"
+    # a reference patched into the module (tests/test_model.py::_exact_kernels) and a rewritten forward (kev.fused_qwen35)
+    monkeypatch.setattr(Q, "causal_conv1d_fn", inspect.unwrap(Q.causal_conv1d_fn))
+    def deltanet_forward(self, *a, **k): pass
+    layer = next(m for m in models[0].lm.modules() if isinstance(m, Q.Qwen3_5GatedDeltaNet))
+    layer.forward = types.MethodType(deltanet_forward, layer)
+    env = P.kernel_environment(models[0], "cpu")
+    assert env["deltanet"]["causal_conv1d_fn"] == f"{Q.__name__}.causal_conv1d_fn"
+    assert env["deltanet"]["forward"].endswith("test_benchmark_report_records_the_kernel_environment.<locals>.deltanet_forward")
+    # the MLX backend: its dtype, no torch module walk
+    mlx = types.SimpleNamespace(backend="mlx", dtype="bfloat16", hybrid=True)
+    assert {k: P.kernel_environment(mlx, "mlx")[k] for k in ("backend", "dtype", "attention", "deltanet")} == {"backend": "mlx", "dtype": "bfloat16", "attention": None, "deltanet": None}
+
+
+def test_trial_provenance_records_the_kernel_environment(tiny_base, tmp_path, monkeypatch):
+    """A trial's reads (kev.experiment.score_trial: calibration, development, mechanism checks, transfer) name the kernel set
+    they were scored on, as kev.benchmark's report.json does: provenance.json and result.json's provenance carry
+    `environment`, the predictor's own (kev.predictors.kernel_environment, after load), next to the fields they always had.
+    Provenance written before the key existed still aggregates and still tells kev.rounds the trial's suite and training."""
+    import json, shutil
+    from kev import experiment as E, predictors as P, rounds
+    from kev.data import load_records
+    from kev.suite import digest, read_json, write_json
+    train_tiny(tiny_base, tmp_path / "full", *FULL, "--max_steps", "1", monkeypatch=monkeypatch)
+    records = [{**r, "_meta": {"id": f"tiny-{i}", "group_id": f"tiny-{i}", "variant": "clean", "source": "tiny"},
+                "questions": {qid: {**q, "src": "tiny"} for qid, q in r["questions"].items()}} for i, r in enumerate(load_records(tiny_base / "data.jsonl")[:3])]
+    monkeypatch.setattr(E, "load_split", lambda suite, split: [] if split == "calibration" else records)   # a legacy trial may have no calibration partition
+    monkeypatch.setattr(E, "read_manifest", lambda suite: {})
+    predictors, real = [], E.LocalPredictor
+    monkeypatch.setattr(E, "LocalPredictor", lambda *a, **k: predictors.append(real(*a, **k)) or predictors[-1])
+    suite, study = E.ROOT / "evals/smoke-v1", tmp_path / "runs/s"
+    E.execute_trial({"base": "tiny"}, suite, study / "00-trial-0", E.source_hashes(), "cpu", existing=tmp_path / "full")
+    provenance = read_json(study / "00-trial-0/provenance.json")
+    [predictor] = predictors
+    assert provenance["environment"] == predictor.environment == read_json(study / "00-trial-0/result.json")["provenance"]["environment"]
+    env = provenance["environment"]
+    assert set(env) == set(P.kernel_environment(predictor.model, "cpu")) and env["device"] == "cpu" and env["gpu"] is None
+    assert env["dtype"] == predictor.model.dtype and env["deltanet"]["forward"].endswith("GatedDeltaNet.forward") and env["packages"]["torch"] == torch.__version__
+    assert {"config", "config_sha256", "suite_sha256", "source_hashes", "git_commit", "platform", "torch", "device", "gpu", "legacy_checkpoint", "measured_checkpoint"} < set(provenance)
+    assert (provenance["torch"], provenance["gpu"], provenance["suite_sha256"]) == (torch.__version__, None, digest(suite / "manifest.json"))
+    # a trial recorded before `environment` existed
+    shutil.copytree(study / "00-trial-0", study / "01-old")
+    for name, path in (("provenance.json", ()), ("result.json", ("provenance",))):
+        data = read_json(study / "01-old" / name); node = data
+        for key in path: node = node[key]
+        del node["environment"]; write_json(study / "01-old" / name, data)
+    E.aggregate(study)
+    ledger = [json.loads(line) for line in (study / "results.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [r["id"] for r in ledger] == ["00-trial-0", "01-old"] and ledger[0] == {**ledger[1], "id": "00-trial-0", "path": str(study / "00-trial-0")}
+    for trial in ("runs/s/00-trial-0", "runs/s/01-old"):
+        assert rounds.trial_suite({}, trial, root=tmp_path) == "evals/smoke-v1"
+        assert rounds.trial_training({}, trial, root=tmp_path) == rounds.recorded_training(digest(suite / "manifest.json"))
 
 
 def test_local_predictor_long_rows_on_mlx_use_its_forward(monkeypatch):
@@ -1773,14 +2122,17 @@ def test_a_complete_snapshot_is_never_deleted(tmp_path, capsys):
 
 class _FakeHub:
     """HfApi stand-in: repo visibility, create_repo, upload_folder (records the call, returns a commit), failures on demand."""
-    def __init__(self, private=True, exists=True, failures=0):
-        self.private, self.exists, self.failures, self.uploads, self.created = private, exists, failures, [], []
+    def __init__(self, private=True, exists=True, failures=0, files=()):
+        self.private, self.exists, self.failures, self.uploads, self.created, self.files = private, exists, failures, [], [], list(files)
 
     def create_repo(self, repo, repo_type=None, private=None, exist_ok=False):
         if not self.exists: self.exists, self.private = True, private; self.created.append((repo, private))
 
     def repo_info(self, repo, repo_type=None):
         return SimpleNamespace(private=self.private)
+
+    def list_repo_files(self, repo, repo_type=None, revision=None):
+        return list(self.files)
 
     def upload_folder(self, **kw):
         if self.failures: self.failures -= 1; raise ConnectionError("hub unavailable")
@@ -1818,6 +2170,85 @@ def test_mirror_uploads_complete_checkpoints_to_a_private_repo_only(tmp_path):
     assert mirror(final, "me/public", api=public, root=root, log=logs.append, force=True) is None and public.uploads == [] and "not a private repo" in logs[-1]
     half = root / "s/00-trial-0/snapshots/step-0000777/checkpoint"; half.mkdir(parents=True); (half / "head.pt").write_bytes(b"h")
     assert mirror(half, "me/kev-snapshots", api=hub, root=root, log=logs.append) is None and "not a complete checkpoint" in logs[-1]
+
+
+def _fake_full_checkpoint(path, shards=2):
+    from kev.checkpoint import Meta, write_meta
+    from kev.suite import write_json
+    path.mkdir(parents=True)
+    write_json(path / "config.json", {}); write_json(path / "tokenizer.json", {})
+    for i in range(shards): (path / f"model-{i + 1:05d}-of-{shards:05d}.safetensors").write_bytes(bytes([i]) * 1000)
+    write_meta(path, Meta(base="Qwen/Qwen3.8-27B", weights="full", weights_dtype="bf16"))
+    write_json(path.parent / "interpolation.json", {"alpha": 0.85})
+    return path
+
+
+def test_release_copy_checks_the_weights_hash_and_never_overwrites(tmp_path):
+    """scripts/release_checkpoint.py: the copy's weights hash (computed in parallel) equals Checkpoint.weights_sha256 of the
+    source, the record files beside the checkpoint come along, an existing release directory is refused, and a wrong
+    --expect is refused before anything is written."""
+    from kev.checkpoint import Checkpoint
+    from scripts.release_checkpoint import copy_checkpoint, weights_sha256
+    src = _fake_full_checkpoint(tmp_path / "r23-wise/k-w85/checkpoint")
+    want = Checkpoint(str(src)).weights_sha256()
+    assert weights_sha256(src) == want
+    report = copy_checkpoint(src, tmp_path / "release/x/checkpoint", expect=want, log=lambda m: None)
+    assert report["weights_sha256"] == want == Checkpoint(str(tmp_path / "release/x/checkpoint")).weights_sha256()
+    assert report["sidecars"] == ["interpolation.json"] and report["head_sha256"]["src"] == report["head_sha256"]["dst"]
+    with pytest.raises(FileExistsError): copy_checkpoint(src, tmp_path / "release/x/checkpoint", log=lambda m: None)
+    with pytest.raises(ValueError, match="not the expected"): copy_checkpoint(src, tmp_path / "release/y/checkpoint", expect="0" * 64, log=lambda m: None)
+    assert not (tmp_path / "release/y").exists()
+
+
+def test_publish_private_refuses_a_public_repo_and_links_shards(tmp_path, monkeypatch):
+    """kev.publish --private creates a missing repo private and refuses an existing public one before uploading; a
+    full-weight checkpoint's shards are linked into the staging directory (not copied) and the trial's interpolation.json
+    is uploaded with it."""
+    import sys
+    from kev import publish
+    run = _fake_full_checkpoint(tmp_path / "release/x/checkpoint")
+    card = tmp_path / "card.md"; card.write_text("---\nbase_model: x\nbase_model_relation: finetune\n---\nCard\n", encoding="utf-8")
+    staged = {}
+
+    def upload_folder(**kw):
+        folder = Path(kw["folder_path"])
+        staged.update({p.name: p.is_symlink() for p in folder.iterdir()})
+        return SimpleNamespace(oid="c1")
+
+    for hub, ok in ((_FakeHub(private=False), False), (_FakeHub(exists=False), True)):
+        hub.upload_folder = upload_folder
+        monkeypatch.setattr(publish, "HfApi", lambda: hub)
+        monkeypatch.setattr(sys, "argv", ["kev.publish", "--run", str(run), "--repo", "me/cand", "--card", str(card), "--private", "--message", "m"])
+        if not ok:
+            with pytest.raises(PermissionError): publish.main()
+            assert staged == {}
+            continue
+        publish.main()
+        assert hub.created == [("me/cand", True)]
+    shards = {n for n in staged if n.startswith("model-")}
+    assert len(shards) == 2 and all(staged[n] for n in shards) and not staged["head.pt"] and "interpolation.json" in staged and "README.md" in staged
+
+
+def test_publish_refuses_a_stale_layout_unless_replacing(tmp_path, monkeypatch):
+    """A full-weight upload into a repo that still holds an adapter is refused before anything is staged (the loader rule
+    would pick the adapter); with --replace it goes through as one commit that deletes every file it does not carry
+    (upload_folder's delete_patterns="*"). An adapter upload into a repo holding backbone shards is refused the same way."""
+    import sys
+    from kev import publish
+    run = _fake_full_checkpoint(tmp_path / "release/x/checkpoint")
+    card = tmp_path / "card.md"; card.write_text("---\nbase_model: x\nbase_model_relation: finetune\n---\nCard\n", encoding="utf-8")
+    hub = _FakeHub(private=False, files=[".gitattributes", "README.md", "adapter_config.json", "adapter_model.safetensors", "head.pt", "result.json"])
+    monkeypatch.setattr(publish, "HfApi", lambda: hub)
+    argv = ["kev.publish", "--run", str(run), "--repo", "me/kev-27b", "--card", str(card), "--message", "m"]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit, match="adapter_config.json"): publish.main()
+    assert hub.uploads == []
+    monkeypatch.setattr(sys, "argv", argv + ["--replace"])
+    publish.main()
+    assert len(hub.uploads) == 1 and hub.uploads[0]["delete_patterns"] == "*"
+    assert publish.stale_layout(_FakeHub(files=["model-00001-of-00002.safetensors", "model.safetensors.index.json", "head.pt"]), "r", None, full=False) == \
+        ["model-00001-of-00002.safetensors", "model.safetensors.index.json"]
+    assert publish.stale_layout(_FakeHub(files=["config.json", "model.safetensors", "head.pt"]), "r", None, full=True) == []
 
 
 def test_committed_snapshots_and_the_final_checkpoint_are_mirrored(tmp_path, monkeypatch, capsys):
@@ -1972,3 +2403,102 @@ def test_jev_counts_a_hosted_error_on_an_oversize_request_as_a_refusal(monkeypat
         j = P.JevPredictor("key", count_refusals=True, budget=100)
         with pytest.raises(raised): j(record)
         assert w.lines == lines and j.accounting()["refusals"] == refusals
+
+
+def test_release_assets_are_deterministic_and_refuse_placeholders_and_wrong_hashes(tmp_path):
+    """scripts/build_release_assets.py: a card with a {{PLACEHOLDER}} is refused before anything is downloaded; a staged
+    file whose sha256 differs from the spec is refused; the tarball is byte-identical when rebuilt from the same files
+    (mtime, owner and member order do not enter it), and SHA256SUMS.txt is in `shasum -a 256 -c` format."""
+    import hashlib, os, tarfile
+    from scripts.build_release_assets import card_problems, check_asset, deterministic_tar, stage, write_sums
+    root = tmp_path / "repo"; (root / "docs").mkdir(parents=True); (root / "runs").mkdir()
+    (root / "docs/card.md").write_text("Validated context: {{VALIDATED_CONTEXT_4B}}\n", encoding="utf-8")
+    (root / "runs/locked.json").write_text("{}", encoding="utf-8")
+    payload = b"adapter bytes"
+    asset = {"name": "kev-x", "repo": "r/kev-x", "revision": "abc", "card": "docs/card.md", "locked": "runs/locked.json",
+             "expect": {"adapter_model.safetensors": hashlib.sha256(payload).hexdigest()}}
+    assert card_problems((root / "docs/card.md").read_text(encoding="utf-8")) == ["{{VALIDATED_CONTEXT_4B}}"]
+    assert check_asset(asset, root) == ["kev-x: card docs/card.md still has {{VALIDATED_CONTEXT_4B}}"]
+    (root / "docs/card.md").write_text("Validated context: 16,384 tokens\n", encoding="utf-8")
+    assert check_asset(asset, root) == []
+
+    def download(content):
+        def fake(repo, revision, local_dir):
+            os.makedirs(local_dir, exist_ok=True)
+            for name, data in {"adapter_model.safetensors": content, "head.pt": b"head", "README.md": b"old card", ".gitattributes": b""}.items():
+                with open(os.path.join(local_dir, name), "wb") as f: f.write(data)
+        return fake
+
+    with pytest.raises(SystemExit, match="sha256"):
+        stage(asset, tmp_path / "w0", root, download(b"tampered"))
+    staged = stage(asset, tmp_path / "w1", root, download(payload))
+    assert sorted(p.name for p in staged.iterdir()) == ["README.md", "adapter_model.safetensors", "head.pt", "locked_test.json"]
+    assert (staged / "README.md").read_text(encoding="utf-8") == "Validated context: 16,384 tokens\n"
+    first = deterministic_tar(staged, tmp_path / "a.tar.gz", 1790812800)
+    os.utime(staged / "head.pt", (1, 1))
+    again = stage(asset, tmp_path / "w2", root, download(payload))
+    assert deterministic_tar(again, tmp_path / "b.tar.gz", 1790812800) == first
+    with tarfile.open(tmp_path / "a.tar.gz") as tar:
+        assert tar.getnames() == ["kev-x", "kev-x/README.md", "kev-x/adapter_model.safetensors", "kev-x/head.pt", "kev-x/locked_test.json"]
+        assert {m.mtime for m in tar.getmembers()} == {1790812800}
+    sums = write_sums({"b.tar.gz": "2" * 64, "a.tar.gz": first}, tmp_path)
+    assert sums.read_text(encoding="utf-8") == f"{first}  a.tar.gz\n{'2' * 64}  b.tar.gz\n"
+
+
+def test_release_assets_carry_the_release_date(tmp_path):
+    """scripts/build_release_assets.py stamps every member and the gzip header with midnight UTC of the spec's
+    release_date (SOURCE_DATE_EPOCH wins when set), the date is the only thing besides names and contents the bytes depend
+    on, and the extracted checkpoint serves that date (Kev 1.0's first tarballs used mtime 0: /v1/models said 1969-12-31)."""
+    import os, tarfile
+    from kev.checkpoint import Checkpoint, Meta, write_meta
+    from scripts.build_release_assets import deterministic_tar, source_date_epoch
+    day = source_date_epoch({"release_date": "2026-10-01"}, env={})
+    assert day == 1790812800                                                   # 2026-10-01T00:00:00Z
+    assert source_date_epoch({"release_date": "2026-10-01"}, env={"SOURCE_DATE_EPOCH": "1700000000"}) == 1700000000
+    src = tmp_path / "kev-x"; src.mkdir()
+    write_meta(src, Meta(base="b"))
+    (src / "adapter_model.safetensors").write_bytes(b"adapter")
+    first = deterministic_tar(src, tmp_path / "a.tar.gz", day)
+    os.utime(src / "head.pt", (5, 5))
+    assert deterministic_tar(src, tmp_path / "b.tar.gz", day) == first
+    assert deterministic_tar(src, tmp_path / "c.tar.gz", day + 86400) != first
+    assert int.from_bytes((tmp_path / "a.tar.gz").read_bytes()[4:8], "little") == day   # gzip header MTIME (RFC 1952)
+    with tarfile.open(tmp_path / "a.tar.gz") as tar:
+        assert {m.mtime for m in tar.getmembers()} == {day}
+        tar.extractall(tmp_path / "x", filter="data")
+    assert Checkpoint(tmp_path / "x" / "kev-x").release_date() == "2026-10-01"
+
+
+def test_release_date_skips_zeroed_mtimes_and_uses_utc(tmp_path, monkeypatch):
+    """Checkpoint.release_date for a local run: head.pt's UTC date when it is a real time; a pre-2000 head.pt (a zeroed
+    archive mtime) falls back to the newest real file time, and to "unknown" (a non-empty string the TypeSafe card
+    accepts) when there is none. A Hub id still reports the Hub commit date and only reads files when the Hub is down."""
+    import datetime, os, time
+    from types import SimpleNamespace
+    import huggingface_hub
+    from kev.checkpoint import Checkpoint, Meta, write_meta
+    write_meta(tmp_path, Meta(base="b"))
+    (tmp_path / "adapter_model.safetensors").write_bytes(b"adapter")
+    late = 1790895599                                                          # 2026-10-01T23:59:59Z
+    os.utime(tmp_path / "head.pt", (late, late)); os.utime(tmp_path / "adapter_model.safetensors", (0, 0))
+    ck = Checkpoint(tmp_path)
+    monkeypatch.setenv("TZ", "Asia/Tokyo"); time.tzset()                      # UTC+9: the local date is 2026-10-02
+    try:
+        assert ck.release_date() == "2026-10-01"
+    finally:
+        monkeypatch.undo(); time.tzset()
+    os.utime(tmp_path / "head.pt", (0, 0)); os.utime(tmp_path / "adapter_model.safetensors", (1790812800 - 86400, 1790812800 - 86400))
+    assert ck.release_date() == "2026-09-30"
+    os.utime(tmp_path / "adapter_model.safetensors", (0, 0))
+    assert ck.release_date() == "unknown"
+
+    calls = []
+    def model_info(repo, revision=None):
+        calls.append((repo, revision))
+        if repo == "down/kev": raise OSError("offline")
+        return SimpleNamespace(last_modified=datetime.datetime(2026, 9, 29, 12, tzinfo=datetime.timezone.utc))
+    monkeypatch.setattr(huggingface_hub, "HfApi", lambda: SimpleNamespace(model_info=model_info))
+    ck.requested = "jaredpalmer/kev-x@v1.0"
+    assert ck.release_date() == "2026-09-29" and calls == [("jaredpalmer/kev-x", "v1.0")]
+    ck.requested = "down/kev"
+    assert ck.release_date() == "unknown"                                      # offline: the cached files' rule
